@@ -43,6 +43,57 @@ http://127.0.0.1:8765
 
 O painel usa `mandados_processados.json` quando ele existir na pasta. Se esse arquivo nao existir, usa `pecas_autorizadas.json`, mas sem CPF, validade e endereco extraidos dos PDFs.
 
+## Como rodar com Docker Compose
+
+Coloque o arquivo de dados fora do Git, na pasta `data`:
+
+```text
+data/mandados_processados.json
+```
+
+Suba o container:
+
+```powershell
+docker compose up -d --build
+```
+
+Abra:
+
+```text
+http://localhost:8765
+```
+
+Se quiser mudar a porta local:
+
+```powershell
+$env:APP_PORT=8080
+docker compose up -d --build
+```
+
+## Deploy no Coolify
+
+No Coolify, use este repositorio como app Docker Compose. O servico expõe a porta interna `8765`.
+Ao configurar dominio/proxy no Coolify, aponte para o servico `painel-bnmp` na porta `8765`.
+
+Para os dados, configure uma variavel ou volume:
+
+- opcao simples: criar uma montagem persistente apontando para `/app/data`;
+- dentro dessa montagem, colocar `mandados_processados.json`;
+- opcionalmente definir `BNMP_DATA_PATH` no Compose/Coolify para apontar para uma pasta da VPS que contenha o JSON.
+
+Exemplo de variaveis:
+
+```text
+APP_PORT=8765
+BNMP_DATA_PATH=/caminho/na/vps/dados-bnmp
+```
+
+Dentro de `/caminho/na/vps/dados-bnmp`, deixe:
+
+```text
+mandados_processados.json
+```
+
 ## Cookie BNMP
 
 O cookie `portalbnmp` e informado no painel e fica somente em memoria no servidor local. O temporizador do site considera 4 minutos para renovacao.

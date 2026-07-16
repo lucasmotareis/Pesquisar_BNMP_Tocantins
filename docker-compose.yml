@@ -1,0 +1,14 @@
+services:
+  painel-bnmp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      TZ: America/Sao_Paulo
+      BNMP_DATA_DIR: /app/data
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${APP_PORT:-8765}:8765"
+    volumes:
+      - "${BNMP_DATA_PATH:-./data}:/app/data:ro"

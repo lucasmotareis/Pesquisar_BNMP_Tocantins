@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 import time
 import unicodedata
@@ -15,11 +16,19 @@ except ImportError:  # pragma: no cover
 
 
 ROOT = Path(__file__).resolve().parent
+DATA_DIR = Path(os.environ.get("BNMP_DATA_DIR", ROOT)).resolve()
 HTML_FILE = ROOT / "painel_tocantins.html"
 DATA_FILES = [
-    ROOT / "mandados_processados.json",
-    ROOT / "pecas_autorizadas.json",
+    DATA_DIR / "mandados_processados.json",
+    DATA_DIR / "pecas_autorizadas.json",
 ]
+if DATA_DIR != ROOT:
+    DATA_FILES.extend(
+        [
+            ROOT / "mandados_processados.json",
+            ROOT / "pecas_autorizadas.json",
+        ]
+    )
 BNMP_API = "https://portalbnmp.pdpj.jus.br/bnmpportal/api"
 COOKIE_TTL_SECONDS = 4 * 60
 
@@ -1062,6 +1071,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, paginated_records(parse_qs(parsed.query)))
             return
 
+        if path == "/api/health":
+            self.send_json(200, {"status": "ok"})
+            return
+
         if path == "/api/auth/status":
             remaining = cookie_remaining_seconds()
             self.send_json(
@@ -1199,8 +1212,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Painel operacional de mandados do Tocantins."
     )
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
