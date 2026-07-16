@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+
+# Dados locais/sensiveis do BNMP
+mandados_processados.json
+mandados_processados.csv
+pecas_autorizadas.json
+dados.csv
+erros_processamento.json
+pdfs/
+*.pdf
+
+# Paineis antigos com dados embutidos
+Painel de Mandados de Prisão - v*.html
+
+# Logs e backups locais
+*.log
+backup-*.json
+backup-painel-*.json
+backup-painel-pmto-*.json
+
+# Estado local do Codex/agentes
+.agents/

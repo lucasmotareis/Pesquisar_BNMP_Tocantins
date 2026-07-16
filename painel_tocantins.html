@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painel PMTO de Mandados</title>
+  <style>
+    *{box-sizing:border-box}
+    html[data-theme="light"]{
+      --bg:#eef2f6;--surface:#ffffff;--surface-2:#f7f9fc;--text:#111827;--muted:#5f6b7a;
+      --line:#dbe3ee;--blue:#173a63;--blue-2:#24598e;--red:#b3261e;--green:#1e7d4f;
+      --amber:#a05a00;--ok:#22613a;--shadow:rgba(15,23,42,.10);--chip:#eef4fb;
+    }
+    html[data-theme="dark"]{
+      --bg:#0c1117;--surface:#151d27;--surface-2:#111923;--text:#e8eef7;--muted:#9aa8b9;
+      --line:#263446;--blue:#1f4c7c;--blue-2:#2f6ba5;--red:#e05249;--green:#36a86e;
+      --amber:#d58b2c;--ok:#58b77d;--shadow:rgba(0,0,0,.45);--chip:#1e2b3a;
+    }
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;line-height:1.35}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .wrap{max-width:1360px;margin:0 auto;padding:0 16px}
+    .stripe{height:4px;background:linear-gradient(90deg,var(--red) 0 33%,#fff 33% 66%,var(--green) 66% 100%)}
+    header{background:linear-gradient(135deg,var(--blue),var(--blue-2));color:#fff}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 0 14px;flex-wrap:wrap}
+    .brand{display:flex;align-items:center;gap:12px}
+    .mark{width:54px;height:54px;border:2px solid rgba(255,255,255,.75);border-radius:8px;display:grid;place-items:center;font-weight:900;letter-spacing:.5px;background:rgba(255,255,255,.10)}
+    h1{font-size:20px;line-height:1.15;margin:0}
+    .sub{font-size:12px;opacity:.86;margin-top:3px}
+    .head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .head-btn,.cookie-chip{border:1px solid rgba(255,255,255,.30);border-radius:8px;background:rgba(255,255,255,.12);color:#fff;padding:8px 11px;font-size:12px;font-weight:700}
+    .head-btn:hover{background:rgba(255,255,255,.22)}
+    .cookie-chip.ok{background:rgba(30,125,79,.35)}
+    .cookie-chip.warn{background:rgba(160,90,0,.48)}
+    .cookie-chip.bad{background:rgba(179,38,30,.48)}
+    .kpis{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px;padding:0 0 14px}
+    .kpi{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.20);border-radius:8px;padding:10px 12px;min-height:68px}
+    .kpi .n{font-weight:850;font-size:24px}
+    .kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.4px;opacity:.82;margin-top:2px}
+    .filters{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--line);box-shadow:0 2px 12px var(--shadow)}
+    .filter-grid{display:grid;grid-template-columns:2fr repeat(7,minmax(120px,1fr));gap:8px;padding:11px 0}
+    .control{display:flex;flex-direction:column;gap:3px;min-width:0}
+    .control label{font-size:10px;text-transform:uppercase;letter-spacing:.45px;color:var(--muted);font-weight:800}
+    input,select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--text);outline:none}
+    input,select{height:38px;padding:8px 10px;font-size:13px}
+    input:focus,select:focus,textarea:focus{border-color:var(--blue-2);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue-2) 18%,transparent)}
+    main{padding:16px 0 30px}
+    .notice{display:none;background:#fff7e8;color:#6c4200;border:1px solid #f0d4a3;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+    html[data-theme="dark"] .notice{background:#2c2114;color:#f5cb8a;border-color:#63451e}
+    .notice.on{display:block}
+    .summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+    .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px}
+    .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.45px;color:var(--muted);margin:0 0 10px}
+    .bars{display:flex;flex-direction:column;gap:6px}
+    .bar{display:grid;grid-template-columns:150px 1fr 34px;align-items:center;gap:8px;font-size:12px}
+    .bar .label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .track{height:12px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+    .fill{height:100%;background:linear-gradient(90deg,var(--blue-2),var(--blue))}
+    .meta-row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:8px 0 10px;flex-wrap:wrap}
+    .count{font-size:13px;color:var(--muted)}
+    .count b{font-size:17px;color:var(--text)}
+    .source-tabs{display:flex;gap:6px;flex-wrap:wrap}
+    .tab{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--muted);font-weight:750}
+    .tab.active{background:var(--blue);border-color:var(--blue);color:#fff}
+    .section-title{display:flex;align-items:center;gap:8px;margin:18px 0 9px}
+    .section-title h2{font-size:14px;margin:0}
+    .section-title span{font-size:12px;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+    .card{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 1px 4px var(--shadow);display:flex;flex-direction:column;gap:8px}
+    .card.pinned{border-left-color:var(--blue)}
+    .card.priority-Urgente{border-left-color:var(--red)}
+    .card.priority-Alta{border-left-color:#d85d12}
+    .card.priority-Media{border-left-color:var(--amber)}
+    .card.priority-Baixa{border-left-color:var(--blue-2)}
+    .card-head{display:flex;gap:8px;justify-content:space-between;align-items:flex-start}
+    .name{font-size:15px;font-weight:850;line-height:1.2}
+    .badges{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+    .badge{display:inline-flex;align-items:center;border-radius:7px;padding:3px 7px;font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.25px;background:var(--chip);color:var(--blue)}
+    .badge.red{background:#fde8e6;color:#9b1d16}
+    .badge.green{background:#e5f4eb;color:#1e6038}
+    .badge.amber{background:#fff2da;color:#895000}
+    html[data-theme="dark"] .badge.red{background:#3a1b19;color:#f4908b}
+    html[data-theme="dark"] .badge.green{background:#183325;color:#82d9a2}
+    html[data-theme="dark"] .badge.amber{background:#382714;color:#eab466}
+    .line{font-size:12px;color:var(--muted)}
+    .line b{color:var(--text)}
+    .crime{background:var(--surface-2);border-left:3px solid var(--red);border-radius:7px;padding:8px 9px;font-size:12px}
+    .address{border-top:1px dashed var(--line);padding-top:8px;font-size:12px;color:var(--muted)}
+    .actions{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:2px}
+    .download{height:38px;border:0;border-radius:8px;background:var(--blue);color:#fff;font-weight:850;font-size:12px}
+    .download:disabled{opacity:.45;cursor:not-allowed}
+    .small-btn{height:38px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--text);font-size:12px;font-weight:800;padding:0 10px}
+    .extra{background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 9px;font-size:12px}
+    .extra .k{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:850}
+    .edit{display:none;background:var(--surface-2);border:1px dashed var(--line);border-radius:8px;padding:9px}
+    .edit.on{display:block}
+    .edit-grid{display:grid;grid-template-columns:1fr 120px;gap:8px}
+    .edit label{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:800;display:block;margin-bottom:3px}
+    textarea{min-height:54px;resize:vertical;padding:8px;font-size:12px}
+    .edit-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+    .check{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+    .check input{width:auto;height:auto}
+    .empty{display:none;text-align:center;color:var(--muted);padding:38px 0}
+    .empty.on{display:block}
+    .modal{position:fixed;inset:0;background:rgba(6,13,24,.72);display:none;align-items:center;justify-content:center;z-index:100;padding:18px}
+    .modal.on{display:flex}
+    .box{width:520px;max-width:100%;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 24px 60px rgba(0,0,0,.34);padding:18px}
+    .box h2{margin:0 0 6px;font-size:18px}
+    .box p{margin:0 0 12px;color:var(--muted);font-size:13px}
+    .box .row{display:grid;grid-template-columns:1fr auto;gap:8px}
+    .primary{height:38px;border:0;border-radius:8px;background:var(--blue);color:#fff;padding:0 14px;font-weight:850}
+    .adminbar{display:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px;align-items:center;gap:8px;flex-wrap:wrap}
+    .adminbar.on{display:flex}
+    .adminbar .grow{flex:1}
+    .footer{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding:15px 0 24px;text-align:center}
+    @media(max-width:1060px){.filter-grid{grid-template-columns:1fr 1fr 1fr}.kpis{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:720px){.filter-grid,.summary{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.bar{grid-template-columns:110px 1fr 28px}.actions{grid-template-columns:1fr}.edit-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="stripe"></div>
+  <header>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <div class="mark">PMTO</div>
+          <div>
+            <h1>Painel de Mandados de Prisão</h1>
+            <div class="sub">Polícia Militar do Tocantins · BNMP/CNJ · uso operacional restrito</div>
+          </div>
+        </div>
+        <div class="head-actions">
+          <span class="cookie-chip bad" id="cookieStatus">Cookie pendente</span>
+          <button class="head-btn" id="renewCookieBtn">Renovar cookie</button>
+          <button class="head-btn" id="reloadBtn">Recarregar dados</button>
+          <button class="head-btn" id="adminBtn">Administrador</button>
+          <button class="head-btn" id="themeBtn">Escuro</button>
+        </div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="n" id="kTotal">0</div><div class="l">Mandados na base</div></div>
+        <div class="kpi"><div class="n" id="kShown">0</div><div class="l">Exibidos</div></div>
+        <div class="kpi"><div class="n" id="kAddress">0</div><div class="l">Incluídos por endereço</div></div>
+        <div class="kpi"><div class="n" id="kUrgent">0</div><div class="l">Prioridade alta/urgente</div></div>
+        <div class="kpi"><div class="n" id="kExpiring">0</div><div class="l">Vencem em 12 meses</div></div>
+      </div>
+    </div>
+  </header>
+
+  <section class="filters">
+    <div class="wrap">
+      <div class="filter-grid">
+        <div class="control">
+          <label for="q">Busca</label>
+          <input id="q" placeholder="Nome, CPF, mãe, processo, endereço">
+        </div>
+        <div class="control">
+          <label for="fcrp">CRP</label>
+          <select id="fcrp"><option value="">Todo o Tocantins</option></select>
+        </div>
+        <div class="control">
+          <label for="funidade">Unidade</label>
+          <select id="funidade"><option value="">Todas</option></select>
+        </div>
+        <div class="control">
+          <label for="forigem">Origem</label>
+          <select id="forigem">
+            <option value="ambos">Órgão ou endereço</option>
+            <option value="orgao">Órgão expedidor</option>
+            <option value="endereco">Endereço informado</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="ftipo">Tipo</label>
+          <select id="ftipo"><option value="">Todos</option></select>
+        </div>
+        <div class="control">
+          <label for="fvalidade">Validade</label>
+          <select id="fvalidade">
+            <option value="">Todas</option>
+            <option value="vencido">Vencidos</option>
+            <option value="90">Vence até 90 dias</option>
+            <option value="365">Vence até 12 meses</option>
+            <option value="ok">Válidos acima de 12 meses</option>
+            <option value="sem">Sem validade</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="fstatus">Status</label>
+          <select id="fstatus"><option value="">Todos</option></select>
+        </div>
+        <div class="control">
+          <label for="fsort">Ordem</label>
+          <select id="fsort">
+            <option value="territorio">Órgão, endereço e recentes</option>
+            <option value="recentes">Expedição mais recente</option>
+            <option value="validade">Validade mais próxima</option>
+            <option value="nome">Nome A-Z</option>
+            <option value="prioridade">Prioridade</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <main class="wrap">
+    <div class="notice" id="dataNotice"></div>
+    <div class="adminbar" id="adminBar">
+      <b>Modo administrador ativo</b>
+      <span class="grow"></span>
+      <button class="small-btn" id="exportBtn">Exportar backup</button>
+      <button class="small-btn" id="importBtn">Importar backup</button>
+      <button class="small-btn" id="logoutAdminBtn">Sair</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none">
+    </div>
+    <div class="summary">
+      <section class="panel">
+        <h2>Distribuição por CRP</h2>
+        <div class="bars" id="byCrp"></div>
+      </section>
+      <section class="panel">
+        <h2>Distribuição por tipo</h2>
+        <div class="bars" id="byType"></div>
+      </section>
+    </div>
+    <div class="meta-row">
+      <div class="count"><b id="shownText">0</b> mandados encontrados</div>
+      <div class="source-tabs">
+        <button class="tab active" data-source-tab="todos">Todos</button>
+        <button class="tab" data-source-tab="orgao">Órgão expedidor</button>
+        <button class="tab" data-source-tab="endereco">Endereço informado</button>
+      </div>
+    </div>
+    <section id="orgaoSection">
+      <div class="section-title"><h2>Correspondência por órgão expedidor</h2><span id="orgaoCount">0</span></div>
+      <div class="grid" id="orgaoGrid"></div>
+    </section>
+    <section id="enderecoSection">
+      <div class="section-title"><h2>Correspondência por endereço informado</h2><span id="enderecoCount">0</span></div>
+      <div class="grid" id="enderecoGrid"></div>
+    </section>
+    <div class="empty" id="empty">Nenhum mandado encontrado com os filtros atuais.</div>
+  </main>
+
+  <div class="footer">Dados locais do BNMP/CNJ. O cookie informado fica apenas na memória do servidor local.</div>
+
+  <div class="modal" id="cookieModal">
+    <div class="box">
+      <h2>Autenticação BNMP</h2>
+      <p>Cole o cookie portalbnmp da sessão atual. O acesso fica ativo por 4 minutos.</p>
+      <div class="row">
+        <input id="cookieInput" type="password" placeholder="portalbnmp=...">
+        <button class="primary" id="saveCookieBtn">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="adminModal">
+    <div class="box">
+      <h2>Acesso administrativo</h2>
+      <p>Use a senha local para editar prioridade, paradeiro e observações.</p>
+      <div class="row">
+        <input id="adminPass" type="password" placeholder="Senha">
+        <button class="primary" id="adminLoginBtn">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TERRITORIO=[
+      {id:'cpc-1bpm',crp:'CPC',unidade:'1º BPM',cidade:'Palmas',aliases:['Palmas']},
+      {id:'cpc-6bpm',crp:'CPC',unidade:'6º BPM',cidade:'Palmas',aliases:['Palmas']},
+      {id:'cpc-13bpm',crp:'CPC',unidade:'13º BPM',cidade:'Taquaruçu',aliases:['Taquaruçu','Taquarucu']},
+      {id:'cpc-1cipm',crp:'CPC',unidade:'1ª CIPM',cidade:'Luzimangues',aliases:['Luzimangues']},
+      {id:'crp1-3bpm',crp:'CRP-1',unidade:'3º BPM',cidade:'Pedro Afonso',aliases:['Pedro Afonso']},
+      {id:'crp1-5bpm',crp:'CRP-1',unidade:'5º BPM',cidade:'Porto Nacional',aliases:['Porto Nacional']},
+      {id:'crp1-7bpm',crp:'CRP-1',unidade:'7º BPM',cidade:'Guaraí',aliases:['Guaraí','Guarai']},
+      {id:'crp1-8bpm',crp:'CRP-1',unidade:'8º BPM',cidade:'Paraíso do Tocantins',aliases:['Paraíso do Tocantins','Paraiso do Tocantins','Paraiso']},
+      {id:'crp1-4cipm',crp:'CRP-1',unidade:'4ª CIPM',cidade:'Lagoa da Confusão',aliases:['Lagoa da Confusão','Lagoa da Confusao']},
+      {id:'crp1-6cipm',crp:'CRP-1',unidade:'6ª CIPM',cidade:'Miracema',aliases:['Miracema','Miracema do Tocantins']},
+      {id:'crp2-2bpm',crp:'CRP-2',unidade:'2º BPM',cidade:'Araguaína',aliases:['Araguaína','Araguaina']},
+      {id:'crp2-9bpm',crp:'CRP-2',unidade:'9º BPM',cidade:'Araguatins',aliases:['Araguatins']},
+      {id:'crp2-14bpm',crp:'CRP-2',unidade:'14º BPM',cidade:'Colinas do Tocantins',aliases:['Colinas do Tocantins','Colinas']},
+      {id:'crp2-2cipm',crp:'CRP-2',unidade:'2ª CIPM',cidade:'Xambioá',aliases:['Xambioá','Xambioa']},
+      {id:'crp2-3cipm',crp:'CRP-2',unidade:'3ª CIPM',cidade:'Goiatins',aliases:['Goiatins']},
+      {id:'crp2-15bpm',crp:'CRP-2',unidade:'15º BPM',cidade:'Tocantinópolis',aliases:['Tocantinópolis','Tocantinopolis']},
+      {id:'crp3-4bpm',crp:'CRP-3',unidade:'4º BPM',cidade:'Gurupi',aliases:['Gurupi']},
+      {id:'crp3-10bpm',crp:'CRP-3',unidade:'10º BPM',cidade:'Arraias',aliases:['Arraias']},
+      {id:'crp3-11bpm',crp:'CRP-3',unidade:'11º BPM',cidade:'Dianópolis',aliases:['Dianópolis','Dianopolis']},
+      {id:'crp3-12bpm',crp:'CRP-3',unidade:'12º BPM',cidade:'Taguatinga',aliases:['Taguatinga','Taguatinga do Tocantins']},
+      {id:'crp3-7cipm',crp:'CRP-3',unidade:'7ª CIPM',cidade:'Alvorada',aliases:['Alvorada']},
+      {id:'crp3-8cipm',crp:'CRP-3',unidade:'8ª CIPM',cidade:'Palmeirópolis',aliases:['Palmeirópolis','Palmeiropolis']}
+    ];
+    const ADMIN_PASS='admin123';
+    const $=id=>document.getElementById(id);
+    const state={records:[],meta:{},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,admin:sessionStorage.getItem('pmto_admin')==='1',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
+    const unitById=Object.fromEntries(TERRITORIO.map(u=>[u.id,u]));
+
+    function norm(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
+    function esc(value){return String(value??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+    function editFor(id){return state.edits[id]||(state.edits[id]={paradeiro:'',info:'',prioridade:'Normal',pinned:false,updates:[]});}
+    function saveEdits(){localStorage.setItem('pmto_edits',JSON.stringify(state.edits));}
+    function daysUntil(iso){if(!iso)return null;const today=new Date();today.setHours(0,0,0,0);const d=new Date(iso+'T00:00:00');return Math.round((d-today)/86400000);}
+    function validityClass(record){const days=daysUntil(record.dataValidadeIso);if(days===null)return 'sem';if(days<0)return 'vencido';if(days<=90)return '90';if(days<=365)return '365';return 'ok';}
+    function validityLabel(record){const cls=validityClass(record);if(cls==='sem')return 'sem validade';if(cls==='vencido')return 'vencido';if(cls==='90')return 'vence em 90 dias';if(cls==='365')return 'vence em 12 meses';return 'válido';}
+    function hasAlias(text,aliases){const source=norm(text);return aliases.some(alias=>source.includes(norm(alias)));}
+    function activeUnits(){if(state.filters.unit)return [unitById[state.filters.unit]].filter(Boolean);if(state.filters.crp)return TERRITORIO.filter(u=>u.crp===state.filters.crp);return [];}
+    function matchTerritory(record){
+      const units=activeUnits();
+      if(!units.length)return {matches:true,orgao:true,endereco:false,score:0,units:[],all:true};
+      const matches=[];
+      let orgao=false,endereco=false;
+      for(const unit of units){
+        const om=hasAlias(record.orgaoExpedidor,unit.aliases);
+        const em=hasAlias(record.enderecosPessoa,unit.aliases);
+        if(om||em){matches.push({...unit,orgao:om,endereco:em});orgao=orgao||om;endereco=endereco||em;}
+      }
+      if(state.filters.origin==='orgao'&&!orgao)return {matches:false};
+      if(state.filters.origin==='endereco'&&!endereco)return {matches:false};
+      return {matches:matches.length>0,orgao,endereco,score:orgao?0:1,units:matches};
+    }
+    function recordSearchText(r){return norm([r.nomePessoa,r.cpf,r.nomeMae,r.nomePai,r.numeroProcesso,r.numeroPeca,r.orgaoExpedidor,r.enderecosPessoa,r.tipificacaoPenal].join(' '));}
+    function priorityRank(id){const p=editFor(id).prioridade;return {Urgente:0,Alta:1,Média:2,Baixa:3,Normal:4}[p]??4;}
+    function decoratedRecords(){
+      const q=norm(state.filters.q);
+      return state.records.map(record=>({...record,_territory:matchTerritory(record)})).filter(record=>{
+        if(!record._territory.matches)return false;
+        if(q&&!recordSearchText(record).includes(q))return false;
+        if(state.filters.type&&record.descricaoPeca!==state.filters.type)return false;
+        if(state.filters.status&&record.status!==state.filters.status)return false;
+        if(state.filters.validade&&validityClass(record)!==state.filters.validade)return false;
+        if(state.filters.tab==='orgao'&&!record._territory.orgao)return false;
+        if(state.filters.tab==='endereco'&&(record._territory.orgao||!record._territory.endereco))return false;
+        return true;
+      }).sort((a,b)=>{
+        if(state.filters.sort==='prioridade')return priorityRank(a.id)-priorityRank(b.id)||String(b.dataExpedicaoIso).localeCompare(String(a.dataExpedicaoIso));
+        if(state.filters.sort==='recentes')return String(b.dataExpedicaoIso).localeCompare(String(a.dataExpedicaoIso));
+        if(state.filters.sort==='validade')return String(a.dataValidadeIso||'9999-99-99').localeCompare(String(b.dataValidadeIso||'9999-99-99'));
+        if(state.filters.sort==='nome')return String(a.nomePessoa).localeCompare(String(b.nomePessoa),'pt-BR');
+        const pa=editFor(a.id).pinned?0:1,pb=editFor(b.id).pinned?0:1;
+        if(pa!==pb)return pa-pb;
+        if(a._territory.score!==b._territory.score)return a._territory.score-b._territory.score;
+        return String(b.dataExpedicaoIso).localeCompare(String(a.dataExpedicaoIso));
+      });
+    }
+    function fillSelects(){
+      const crps=[...new Set(TERRITORIO.map(u=>u.crp))];
+      $('fcrp').innerHTML='<option value="">Todo o Tocantins</option>'+crps.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+      fillUnits();
+      $('ftipo').innerHTML='<option value="">Todos</option>'+[...new Set(state.records.map(r=>r.descricaoPeca).filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+      $('fstatus').innerHTML='<option value="">Todos</option>'+[...new Set(state.records.map(r=>r.status).filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+    }
+    function fillUnits(){
+      const units=state.filters.crp?TERRITORIO.filter(u=>u.crp===state.filters.crp):TERRITORIO;
+      $('funidade').innerHTML='<option value="">Todas</option>'+units.map(u=>`<option value="${u.id}">${esc(u.unidade)} - ${esc(u.cidade)}</option>`).join('');
+      if(state.filters.unit&&!units.some(u=>u.id===state.filters.unit)){state.filters.unit='';$('funidade').value='';}
+    }
+    function countBy(items,keyFn){
+      const counts={};
+      for(const item of items){const key=keyFn(item);if(!key)continue;counts[key]=(counts[key]||0)+1;}
+      return counts;
+    }
+    function bars(target,counts){
+      const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+      const max=Math.max(1,...entries.map(e=>e[1]));
+      target.innerHTML=entries.length?entries.map(([label,value])=>`<div class="bar"><div class="label">${esc(label)}</div><div class="track"><div class="fill" style="width:${(value/max)*100}%"></div></div><b>${value}</b></div>`).join(''):'<div class="line">Sem registros.</div>';
+    }
+    function sourceBadge(record){
+      if(record._territory.all)return '';
+      if(record._territory.orgao&&record._territory.endereco)return '<span class="badge green">Órgão + endereço</span>';
+      if(record._territory.orgao)return '<span class="badge green">Órgão expedidor</span>';
+      if(record._territory.endereco)return '<span class="badge amber">Endereço informado</span>';
+      return '';
+    }
+    function inferTerritory(record){
+      return TERRITORIO.find(unit=>hasAlias(record.orgaoExpedidor,unit.aliases)||hasAlias(record.enderecosPessoa,unit.aliases));
+    }
+    function priorityClass(priority){return priority==='Média'?'Media':priority;}
+    function card(record){
+      const edit=editFor(record.id);
+      const cls=['card'];
+      if(edit.pinned)cls.push('pinned');
+      if(edit.prioridade&&edit.prioridade!=='Normal')cls.push('priority-'+priorityClass(edit.prioridade));
+      const valid=validityClass(record);
+      const validClass=valid==='vencido'?'red':(valid==='90'||valid==='365'?'amber':'green');
+      const type=record.descricaoPeca||'Mandado';
+      const origem=record._territory.units?.length?record._territory.units.map(u=>`${u.unidade} - ${u.cidade}`).join(', '):'';
+      const updates=(edit.updates||[]).map(u=>`<div class="line"><b>${esc(u.t)}</b> ${esc(u.txt)}</div>`).join('');
+      const extra=[edit.paradeiro?`<div class="extra"><div class="k">Provável paradeiro</div>${esc(edit.paradeiro)}</div>`:'',edit.info?`<div class="extra"><div class="k">Informações</div>${esc(edit.info)}</div>`:'',updates?`<div class="extra"><div class="k">Atualizações</div>${updates}</div>`:''].join('');
+      return `<article class="${cls.join(' ')}" data-id="${record.id}">
+        <div class="card-head">
+          <div class="name">${esc(record.nomePessoa||'Sem nome')}</div>
+          <div class="badges">${sourceBadge(record)}${edit.prioridade&&edit.prioridade!=='Normal'?`<span class="badge red">${esc(edit.prioridade)}</span>`:''}<span class="badge">${esc(type.replace('Mandado de ',''))}</span></div>
+        </div>
+        <div class="line"><b>CPF:</b> ${esc(record.cpf||'Não Informado')} · <b>Nasc.:</b> ${esc(record.dataNascimento||'')}</div>
+        <div class="line"><b>Mãe:</b> ${esc(record.nomeMae||'Não Informado')}</div>
+        <div class="line"><b>Peça:</b> ${esc(record.numeroPeca||record.id)} · <b>Exp.:</b> ${esc(record.dataExpedicao||'')}</div>
+        <div class="line"><b>Órgão:</b> ${esc(record.orgaoExpedidor||'Não informado')}</div>
+        ${origem?`<div class="line"><b>Unidade:</b> ${esc(origem)}</div>`:''}
+        <div class="crime"><b>Tipificação:</b> ${esc(record.tipificacaoPenal||'Não informada')}${record.penaRestante?`<br><b>Pena restante:</b> ${esc(record.penaRestante)}`:''}</div>
+        <div class="address"><b>Endereço:</b> ${esc(record.enderecosPessoa||'Não Informado')}</div>
+        <div class="badges"><span class="badge ${validClass}">${esc(validityLabel(record))}</span><span class="badge">${esc(record.status||'Status não informado')}</span></div>
+        ${extra}
+        <div class="actions">
+          <button class="download" data-download="${record.id}" data-type="${record.idTipoPeca}" ${state.auth?'':'disabled'}>Baixar PDF do mandado</button>
+          <button class="small-btn" data-edit="${record.id}">${state.admin?'Editar':'Detalhes'}</button>
+        </div>
+        <div class="edit ${state.admin?'on':''}">
+          <div class="edit-grid">
+            <div><label>Provável paradeiro</label><textarea data-field="paradeiro" data-id="${record.id}">${esc(edit.paradeiro)}</textarea></div>
+            <div><label>Prioridade</label><select data-field="prioridade" data-id="${record.id}">${['Normal','Baixa','Média','Alta','Urgente'].map(p=>`<option ${edit.prioridade===p?'selected':''}>${p}</option>`).join('')}</select></div>
+          </div>
+          <label>Informações</label><textarea data-field="info" data-id="${record.id}">${esc(edit.info)}</textarea>
+          <div class="edit-actions">
+            <label class="check"><input type="checkbox" data-field="pinned" data-id="${record.id}" ${edit.pinned?'checked':''}> Fixar no topo</label>
+            <button class="small-btn" data-save="${record.id}">Salvar</button>
+            <input data-update-input="${record.id}" placeholder="Nova atualização">
+            <button class="small-btn" data-add-update="${record.id}">Adicionar</button>
+          </div>
+        </div>
+      </article>`;
+    }
+    function render(){
+      document.documentElement.setAttribute('data-theme',state.theme);
+      $('themeBtn').textContent=state.theme==='dark'?'Claro':'Escuro';
+      $('adminBar').classList.toggle('on',state.admin);
+      const data=decoratedRecords();
+      const noTerritoryFilter=!state.filters.crp&&!state.filters.unit;
+      const orgao=noTerritoryFilter?data:data.filter(r=>r._territory.orgao);
+      const endereco=noTerritoryFilter?[]:data.filter(r=>!r._territory.orgao&&r._territory.endereco);
+      $('kTotal').textContent=state.records.length;
+      $('kShown').textContent=data.length;
+      $('kAddress').textContent=endereco.length;
+      $('kUrgent').textContent=data.filter(r=>['Alta','Urgente'].includes(editFor(r.id).prioridade)).length;
+      $('kExpiring').textContent=data.filter(r=>['90','365'].includes(validityClass(r))).length;
+      $('shownText').textContent=data.length;
+      $('orgaoCount').textContent=`${orgao.length} registros`;
+      $('enderecoCount').textContent=`${endereco.length} registros`;
+      document.querySelector('#orgaoSection .section-title h2').textContent=noTerritoryFilter?'Mandados da base':'Correspondência por órgão expedidor';
+      $('orgaoGrid').innerHTML=orgao.map(card).join('');
+      $('enderecoGrid').innerHTML=endereco.map(card).join('');
+      $('orgaoSection').style.display=orgao.length?'block':'none';
+      $('enderecoSection').style.display=endereco.length?'block':'none';
+      $('empty').classList.toggle('on',data.length===0);
+      bars($('byCrp'),countBy(data,r=>r._territory.units?.[0]?.crp||inferTerritory(r)?.crp||'Sem vínculo territorial'));
+      bars($('byType'),countBy(data,r=>r.descricaoPeca||'Sem tipo'));
+      $('dataNotice').textContent=state.meta.warning||'';
+      $('dataNotice').classList.toggle('on',Boolean(state.meta.warning));
+      document.querySelectorAll('.tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.sourceTab===state.filters.tab));
+    }
+    function updateCookieUI(){
+      const remaining=Math.max(0,Math.floor((state.expiresAt-Date.now())/1000));
+      if(!state.auth||remaining<=0){
+        state.auth=false;$('cookieStatus').textContent='Cookie pendente';$('cookieStatus').className='cookie-chip bad';$('cookieModal').classList.add('on');render();return;
+      }
+      const min=String(Math.floor(remaining/60)).padStart(2,'0');
+      const sec=String(remaining%60).padStart(2,'0');
+      $('cookieStatus').textContent=`Cookie ${min}:${sec}`;
+      $('cookieStatus').className='cookie-chip '+(remaining<=30?'warn':'ok');
+    }
+    async function loadStatus(){
+      const res=await fetch('/api/auth/status');const data=await res.json();
+      state.auth=Boolean(data.authenticated);state.expiresAt=Date.now()+(data.remainingSeconds||0)*1000;
+      updateCookieUI();
+    }
+    async function saveCookie(){
+      const cookie=$('cookieInput').value.trim();
+      if(!cookie){alert('Cole o cookie portalbnmp.');return;}
+      const res=await fetch('/api/auth/cookie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie})});
+      const data=await res.json();
+      if(!res.ok){alert(data.error||'Cookie inválido.');return;}
+      state.auth=true;state.expiresAt=Date.now()+(data.remainingSeconds||240)*1000;$('cookieInput').value='';$('cookieModal').classList.remove('on');updateCookieUI();render();
+    }
+    async function loadData(){
+      const res=await fetch('/api/mandados');const data=await res.json();
+      state.records=data.records||[];state.meta=data.meta||{};fillSelects();render();
+    }
+    async function downloadPdf(id,type){
+      if(!state.auth){$('cookieModal').classList.add('on');return;}
+      const btn=document.querySelector(`[data-download="${CSS.escape(String(id))}"]`);
+      if(btn)btn.textContent='Baixando...';
+      try{
+        const res=await fetch(`/api/pdf/${encodeURIComponent(id)}/${encodeURIComponent(type)}`);
+        if(res.status===401){state.auth=false;updateCookieUI();const data=await res.json().catch(()=>({}));alert(data.error||'Cookie expirado.');return;}
+        if(!res.ok){const data=await res.json().catch(()=>({error:'Falha ao baixar PDF.'}));alert(data.error||'Falha ao baixar PDF.');return;}
+        const blob=await res.blob();
+        const record=state.records.find(r=>String(r.id)===String(id))||{};
+        const file=(record.numeroPeca||`mandado-${id}`).replace(/[<>:"/\\|?*\s]+/g,'_')+'.pdf';
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');a.href=url;a.download=file;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+      }finally{
+        if(btn)btn.textContent='Baixar PDF do mandado';
+      }
+    }
+    function setFilter(id,key){$(id).addEventListener('change',e=>{state.filters[key]=e.target.value;if(key==='crp'){fillUnits();}render();});}
+    $('q').addEventListener('input',e=>{state.filters.q=e.target.value;render();});
+    setFilter('fcrp','crp');setFilter('funidade','unit');setFilter('forigem','origin');setFilter('ftipo','type');setFilter('fvalidade','validade');setFilter('fstatus','status');setFilter('fsort','sort');
+    $('themeBtn').addEventListener('click',()=>{state.theme=state.theme==='dark'?'light':'dark';localStorage.setItem('pmto_theme',state.theme);render();});
+    $('renewCookieBtn').addEventListener('click',()=>$('cookieModal').classList.add('on'));
+    $('saveCookieBtn').addEventListener('click',saveCookie);
+    $('cookieInput').addEventListener('keydown',e=>{if(e.key==='Enter')saveCookie();});
+    $('reloadBtn').addEventListener('click',loadData);
+    $('adminBtn').addEventListener('click',()=>{if(state.admin){state.admin=false;sessionStorage.removeItem('pmto_admin');render();return;}$('adminModal').classList.add('on');$('adminPass').focus();});
+    $('adminLoginBtn').addEventListener('click',()=>{if($('adminPass').value===ADMIN_PASS){state.admin=true;sessionStorage.setItem('pmto_admin','1');$('adminModal').classList.remove('on');$('adminPass').value='';render();}else alert('Senha incorreta.');});
+    $('adminPass').addEventListener('keydown',e=>{if(e.key==='Enter')$('adminLoginBtn').click();});
+    $('logoutAdminBtn').addEventListener('click',()=>{state.admin=false;sessionStorage.removeItem('pmto_admin');render();});
+    document.querySelectorAll('[data-source-tab]').forEach(btn=>btn.addEventListener('click',()=>{state.filters.tab=btn.dataset.sourceTab;render();}));
+    document.addEventListener('click',e=>{
+      const dl=e.target.closest('[data-download]');if(dl){downloadPdf(dl.dataset.download,dl.dataset.type);return;}
+      const save=e.target.closest('[data-save]');if(save){const id=save.dataset.save;const edit=editFor(id);document.querySelectorAll(`[data-id="${CSS.escape(id)}"][data-field]`).forEach(el=>{const f=el.dataset.field;edit[f]=el.type==='checkbox'?el.checked:el.value;});saveEdits();render();return;}
+      const add=e.target.closest('[data-add-update]');if(add){const id=add.dataset.addUpdate;const input=document.querySelector(`[data-update-input="${CSS.escape(id)}"]`);const value=input.value.trim();if(value){const edit=editFor(id);edit.updates=edit.updates||[];const now=new Date();edit.updates.unshift({t:now.toLocaleDateString('pt-BR')+' '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),txt:value});saveEdits();render();}return;}
+    });
+    $('exportBtn').addEventListener('click',()=>{const blob=new Blob([JSON.stringify({meta:{exportado:new Date().toISOString(),app:'Painel PMTO'},edits:state.edits},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-painel-pmto-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);});
+    $('importBtn').addEventListener('click',()=>$('importFile').click());
+    $('importFile').addEventListener('change',event=>{const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result);state.edits=parsed.edits||parsed;saveEdits();render();alert('Backup importado.');}catch(error){alert('Arquivo inválido.');}};reader.readAsText(file);event.target.value='';});
+    Promise.all([loadData(),loadStatus()]).then(()=>setInterval(updateCookieUI,1000));
+  </script>
+</body>
+</html>

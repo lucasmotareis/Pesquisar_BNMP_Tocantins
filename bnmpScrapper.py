@@ -27,27 +27,25 @@ headers = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
 }
 
-estado = 1
+estado = 27
 
 dados = []
 
-while estado < 28:
 
 
 
-    json_data = {'buscaOrgaoRecursivo': False,'orgaoExpeditor': {}, 'idEstado': estado,}
 
-    response = requests.post('https://portalbnmp.cnj.jus.br/bnmpportal/api/pesquisa-pecas/csv', cookies=cookies, headers=headers, json=json_data,)
-    lines = response.text.splitlines()
+json_data = {'buscaOrgaoRecursivo': False,'orgaoExpeditor': {}, 'idEstado': estado,}
 
-    reader = str(response.text)
+response = requests.post('https://portalbnmp.cnj.jus.br/bnmpportal/api/pesquisa-pecas/csv', cookies=cookies, headers=headers, json=json_data,)
+lines = response.text.splitlines()
+
+reader = str(response.text)
 
 
-    dados.append(reader)
+dados.append(reader)
 
-    estado+=1
-
-    print(estado)
+  
 
 with open("dados.csv", "w", encoding="utf-16") as f:
     for bloco_texto in dados:
