@@ -2,10 +2,11 @@ import argparse
 import json
 import re
 import time
+import unicodedata
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 try:
     import requests
@@ -26,6 +27,314 @@ AUTH = {
     "cookie": "",
     "expires_at": 0.0,
 }
+RECORD_CACHE = {
+    "key": None,
+    "data": None,
+}
+
+
+def area(id_, crp, unidade, sede, cidades, aliases=None, exclusions=None):
+    return {
+        "id": id_,
+        "crp": crp,
+        "unidade": unidade,
+        "sede": sede,
+        "cidade": sede,
+        "cidades": cidades,
+        "aliases": aliases or [],
+        "exclusions": exclusions or [],
+    }
+
+
+TERRITORIO = [
+    area("cpc-1bpm", "CPC", "1º BPM", "Palmas", ["Palmas"]),
+    area(
+        "cpc-6bpm",
+        "CPC",
+        "6º BPM",
+        "Palmas",
+        ["Palmas"],
+        ["Taquaralto", "Região Sul de Palmas"],
+    ),
+    area(
+        "cpc-13bpm",
+        "CPC",
+        "13º BPM",
+        "Taquaruçu",
+        [
+            "Taquaruçu",
+            "Aparecida do Rio Negro",
+            "Lagoa do Tocantins",
+            "Lizarda",
+            "Mateiros",
+            "Novo Acordo",
+            "Pindorama do Tocantins",
+            "Ponte Alta do Tocantins",
+            "Santa Tereza do Tocantins",
+            "São Félix do Tocantins",
+        ],
+    ),
+    area("cpc-1cipm", "CPC", "1ª CIPM", "Luzimangues", ["Luzimangues"]),
+    area(
+        "crp1-3bpm",
+        "CRP-1",
+        "3º BPM",
+        "Pedro Afonso",
+        [
+            "Bom Jesus do Tocantins",
+            "Centenário",
+            "Itacajá",
+            "Itapiratins",
+            "Pedro Afonso",
+            "Recursolândia",
+            "Rio Sono",
+            "Santa Maria do Tocantins",
+            "Tupirama",
+        ],
+    ),
+    area(
+        "crp1-5bpm",
+        "CRP-1",
+        "5º BPM",
+        "Porto Nacional",
+        [
+            "Brejinho de Nazaré",
+            "Ipueiras",
+            "Monte do Carmo",
+            "Porto Nacional",
+            "Santa Rosa do Tocantins",
+            "Silvanópolis",
+        ],
+    ),
+    area(
+        "crp1-7bpm",
+        "CRP-1",
+        "7º BPM",
+        "Guaraí",
+        [
+            "Colmeia",
+            "Couto Magalhães",
+            "Goianorte",
+            "Guaraí",
+            "Itaporã do Tocantins",
+            "Pequizeiro",
+            "Presidente Kennedy",
+            "Tabocão",
+            "Tupiratins",
+        ],
+    ),
+    area(
+        "crp1-8bpm",
+        "CRP-1",
+        "8º BPM",
+        "Paraíso do Tocantins",
+        [
+            "Abreulândia",
+            "Araguacema",
+            "Barrolândia",
+            "Caseara",
+            "Chapada de Areia",
+            "Divinópolis do Tocantins",
+            "Dois Irmãos do Tocantins",
+            "Marianópolis do Tocantins",
+            "Monte Santo do Tocantins",
+            "Paraíso do Tocantins",
+            "Pugmil",
+        ],
+        ["Paraíso", "Paraiso"],
+    ),
+    area(
+        "crp1-4cipm",
+        "CRP-1",
+        "4ª CIPM",
+        "Lagoa da Confusão",
+        [
+            "Cristalândia",
+            "Fátima",
+            "Lagoa da Confusão",
+            "Nova Rosalândia",
+            "Oliveira de Fátima",
+            "Pium",
+            "Santa Rita do Tocantins",
+        ],
+    ),
+    area(
+        "crp1-16bpm",
+        "CRP-1",
+        "16º BPM",
+        "Miracema do Tocantins",
+        [
+            "Lajeado",
+            "Miracema do Tocantins",
+            "Miranorte",
+            "Rio dos Bois",
+            "Tocantínia",
+        ],
+        ["Miracema"],
+    ),
+    area("crp2-2bpm", "CRP-2", "2º BPM", "Araguaína", ["Araguaína"]),
+    area(
+        "crp2-9bpm",
+        "CRP-2",
+        "9º BPM",
+        "Araguatins",
+        [
+            "Araguatins",
+            "Augustinópolis",
+            "Axixá do Tocantins",
+            "Buriti do Tocantins",
+            "Carrasco Bonito",
+            "Esperantina",
+            "Itaguatins",
+            "Maurilândia do Tocantins",
+            "Praia Norte",
+            "Sampaio",
+            "São Bento do Tocantins",
+            "São Miguel do Tocantins",
+            "São Sebastião do Tocantins",
+            "Sítio Novo do Tocantins",
+        ],
+    ),
+    area(
+        "crp2-14bpm",
+        "CRP-2",
+        "14º BPM",
+        "Colinas do Tocantins",
+        [
+            "Arapoema",
+            "Bandeirantes do Tocantins",
+            "Bernardo Sayão",
+            "Brasilândia do Tocantins",
+            "Colinas do Tocantins",
+            "Juarina",
+            "Nova Olinda",
+            "Palmeirante",
+            "Pau D’Arco",
+        ],
+        ["Colinas", "Pau Darco"],
+    ),
+    area(
+        "crp2-2cipm",
+        "CRP-2",
+        "2ª CIPM",
+        "Xambioá",
+        [
+            "Aragominas",
+            "Araguanã",
+            "Carmolândia",
+            "Darcinópolis",
+            "Muricilândia",
+            "Piraquê",
+            "Santa Fé do Araguaia",
+            "Wanderlândia",
+            "Xambioá",
+        ],
+    ),
+    area(
+        "crp2-3cipm",
+        "CRP-2",
+        "3ª CIPM",
+        "Goiatins",
+        ["Babaçulândia", "Barra do Ouro", "Campos Lindos", "Filadélfia", "Goiatins"],
+    ),
+    area(
+        "crp2-15bpm",
+        "CRP-2",
+        "15º BPM",
+        "Tocantinópolis",
+        [
+            "Aguiarnópolis",
+            "Ananás",
+            "Angico",
+            "Cachoeirinha",
+            "Luzinópolis",
+            "Nazaré",
+            "Palmeiras do Tocantins",
+            "Riachinho",
+            "Santa Terezinha do Tocantins",
+            "Tocantinópolis",
+        ],
+        exclusions=["Brejinho de Nazaré"],
+    ),
+    area(
+        "crp3-4bpm",
+        "CRP-3",
+        "4º BPM",
+        "Gurupi",
+        [
+            "Aliança do Tocantins",
+            "Cariri do Tocantins",
+            "Crixás do Tocantins",
+            "Dueré",
+            "Formoso do Araguaia",
+            "Gurupi",
+            "Peixe",
+            "Sucupira",
+        ],
+    ),
+    area(
+        "crp3-10bpm",
+        "CRP-3",
+        "10º BPM",
+        "Arraias",
+        [
+            "Arraias",
+            "Combinado",
+            "Conceição do Tocantins",
+            "Novo Alegre",
+            "Taipas do Tocantins",
+        ],
+    ),
+    area(
+        "crp3-11bpm",
+        "CRP-3",
+        "11º BPM",
+        "Dianópolis",
+        [
+            "Almas",
+            "Chapada da Natividade",
+            "Dianópolis",
+            "Natividade",
+            "Porto Alegre do Tocantins",
+            "Rio da Conceição",
+        ],
+        exclusions=["São Valério", "São Valério da Natividade"],
+    ),
+    area(
+        "crp3-12bpm",
+        "CRP-3",
+        "12º BPM",
+        "Taguatinga",
+        [
+            "Aurora do Tocantins",
+            "Lavandeira",
+            "Novo Jardim",
+            "Ponte Alta do Bom Jesus",
+            "Taguatinga",
+        ],
+    ),
+    area(
+        "crp3-7cipm",
+        "CRP-3",
+        "7ª CIPM",
+        "Alvorada",
+        ["Alvorada", "Araguaçu", "Figueirópolis", "Sandolândia", "Talismã"],
+    ),
+    area(
+        "crp3-8cipm",
+        "CRP-3",
+        "8ª CIPM",
+        "Palmeirópolis",
+        [
+            "Jaú do Tocantins",
+            "Palmeirópolis",
+            "Paraná",
+            "São Salvador do Tocantins",
+            "São Valério",
+        ],
+        ["São Valério da Natividade"],
+    ),
+]
 
 
 def repair_text(value):
@@ -129,6 +438,206 @@ def iso_date(value):
     return f"{year}-{month}-{day}"
 
 
+def norm_text(value):
+    value = repair_text(value)
+    value = unicodedata.normalize("NFD", str(value or ""))
+    value = "".join(char for char in value if unicodedata.category(char) != "Mn")
+    value = re.sub(r"[^A-Za-z0-9]+", " ", value).upper()
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def has_alias(text, aliases):
+    return has_alias_norm(norm_text(text), [norm_text(alias) for alias in aliases])
+
+
+def has_alias_norm(source_norm, alias_norms):
+    source = f" {source_norm} "
+
+    for term in alias_norms:
+
+        if term and f" {term} " in source:
+            return True
+
+    return False
+
+
+def unit_terms(unit):
+    terms = [
+        unit.get("sede", ""),
+        unit.get("cidade", ""),
+        *unit.get("cidades", []),
+        *unit.get("aliases", []),
+    ]
+    deduped = []
+
+    for term in terms:
+        if term and term not in deduped:
+            deduped.append(term)
+
+    return deduped
+
+
+def unit_term_norms(unit):
+    if "_termNorms" not in unit:
+        unit["_termNorms"] = [norm_text(term) for term in unit_terms(unit)]
+
+    return unit["_termNorms"]
+
+
+def unit_exclusion_norms(unit):
+    if "_exclusionNorms" not in unit:
+        unit["_exclusionNorms"] = [
+            norm_text(term) for term in unit.get("exclusions", [])
+        ]
+
+    return unit["_exclusionNorms"]
+
+
+def has_territory(text, unit):
+    return has_territory_norm(norm_text(text), unit)
+
+
+def has_territory_norm(source_norm, unit):
+    if has_alias_norm(source_norm, unit_exclusion_norms(unit)):
+        return False
+
+    return has_alias_norm(source_norm, unit_term_norms(unit))
+
+
+def active_units(filters):
+    unit_id = filters.get("unit", "")
+    crp = filters.get("crp", "")
+
+    if unit_id:
+        return [unit for unit in TERRITORIO if unit["id"] == unit_id]
+
+    if crp:
+        return [unit for unit in TERRITORIO if unit["crp"] == crp]
+
+    return []
+
+
+def public_unit(unit):
+    return {
+        key: value
+        for key, value in unit.items()
+        if not key.startswith("_")
+    }
+
+
+def match_territory(record, filters):
+    units = active_units(filters)
+
+    if not units:
+        return {
+            "matches": True,
+            "orgao": True,
+            "endereco": False,
+            "score": 0,
+            "units": [],
+            "all": True,
+        }
+
+    matches = []
+    orgao = False
+    endereco = False
+    orgao_source = record.get("_normOrgao") or norm_text(
+        record.get("orgaoExpedidor", "")
+    )
+    endereco_source = record.get("_normEndereco") or norm_text(
+        record.get("enderecosPessoa", "")
+    )
+
+    for unit in units:
+        orgao_match = has_territory_norm(orgao_source, unit)
+        endereco_match = has_territory_norm(endereco_source, unit)
+
+        if orgao_match or endereco_match:
+            found = {
+                **public_unit(unit),
+                "orgao": orgao_match,
+                "endereco": endereco_match,
+            }
+            matches.append(found)
+            orgao = orgao or orgao_match
+            endereco = endereco or endereco_match
+
+    if filters.get("origin") == "orgao" and not orgao:
+        return {"matches": False}
+
+    if filters.get("origin") == "endereco" and not endereco:
+        return {"matches": False}
+
+    return {
+        "matches": bool(matches),
+        "orgao": orgao,
+        "endereco": endereco,
+        "score": 0 if orgao else 1,
+        "units": matches,
+    }
+
+
+def infer_territory(record):
+    orgao_source = record.get("_normOrgao") or norm_text(
+        record.get("orgaoExpedidor", "")
+    )
+    endereco_source = record.get("_normEndereco") or norm_text(
+        record.get("enderecosPessoa", "")
+    )
+
+    for unit in TERRITORIO:
+        if has_territory_norm(orgao_source, unit) or has_territory_norm(
+            endereco_source, unit
+        ):
+            return unit
+
+    return None
+
+
+def record_search_text(record):
+    return norm_text(
+        " ".join(
+            str(record.get(key) or "")
+            for key in (
+                "nomePessoa",
+                "cpf",
+                "nomeMae",
+                "nomePai",
+                "numeroProcesso",
+                "numeroPeca",
+                "orgaoExpedidor",
+                "enderecosPessoa",
+                "tipificacaoPenal",
+            )
+        )
+    )
+
+
+def validity_class(record):
+    iso = record.get("dataValidadeIso", "")
+
+    if not iso:
+        return "sem"
+
+    try:
+        valid_until = datetime.strptime(iso, "%Y-%m-%d").date()
+    except ValueError:
+        return "sem"
+
+    days = (valid_until - datetime.now().date()).days
+
+    if days < 0:
+        return "vencido"
+
+    if days <= 90:
+        return "90"
+
+    if days <= 365:
+        return "365"
+
+    return "ok"
+
+
 def normalize_record(record):
     return {
         "id": record.get("id"),
@@ -171,18 +680,41 @@ def normalize_record(record):
     }
 
 
+def enrich_record(record):
+    record["_normOrgao"] = norm_text(record.get("orgaoExpedidor", ""))
+    record["_normEndereco"] = norm_text(record.get("enderecosPessoa", ""))
+    record["_searchText"] = record_search_text(record)
+    record["_inferredTerritory"] = infer_territory(record)
+    return record
+
+
+def public_record(record):
+    return {
+        key: value
+        for key, value in record.items()
+        if key == "_territory" or not key.startswith("_")
+    }
+
+
 def load_records():
     source = None
     payload = None
+    cache_key = None
 
     for data_file in DATA_FILES:
         if data_file.exists():
             source = data_file
+            stat = data_file.stat()
+            cache_key = (str(data_file), stat.st_mtime_ns, stat.st_size)
+
+            if RECORD_CACHE["key"] == cache_key:
+                return RECORD_CACHE["data"]
+
             payload = json.loads(data_file.read_text(encoding="utf-8"))
             break
 
     if payload is None:
-        return {
+        result = {
             "records": [],
             "meta": {
                 "sourceFile": "",
@@ -191,6 +723,9 @@ def load_records():
                 "warning": "Nenhum arquivo de dados encontrado.",
             },
         }
+        RECORD_CACHE["key"] = None
+        RECORD_CACHE["data"] = result
+        return result
 
     if isinstance(payload, dict):
         raw_records = payload.get("content", [])
@@ -200,7 +735,7 @@ def load_records():
         raw_records = []
 
     records = [
-        normalize_record(record)
+        enrich_record(normalize_record(record))
         for record in raw_records
         if isinstance(record, dict)
     ]
@@ -215,7 +750,7 @@ def load_records():
             "para usar todos os filtros operacionais."
         )
 
-    return {
+    result = {
         "records": records,
         "meta": {
             "sourceFile": source.name,
@@ -223,6 +758,184 @@ def load_records():
             "total": len(records),
             "generatedAt": datetime.now().isoformat(timespec="seconds"),
             "warning": warning,
+        },
+    }
+
+    RECORD_CACHE["key"] = cache_key
+    RECORD_CACHE["data"] = result
+    return result
+
+
+def query_value(query, key, default=""):
+    values = query.get(key)
+
+    if not values:
+        return default
+
+    return repair_text(values[0]) or default
+
+
+def query_int(query, key, default, minimum=None, maximum=None):
+    try:
+        value = int(query_value(query, key, str(default)))
+    except ValueError:
+        value = default
+
+    if minimum is not None:
+        value = max(minimum, value)
+
+    if maximum is not None:
+        value = min(maximum, value)
+
+    return value
+
+
+def facets_for(records):
+    return {
+        "types": sorted(
+            {record.get("descricaoPeca") for record in records if record.get("descricaoPeca")}
+        ),
+        "statuses": sorted(
+            {record.get("status") for record in records if record.get("status")}
+        ),
+    }
+
+
+def sort_records(records, sort):
+    if sort == "recentes":
+        records.sort(key=lambda record: record.get("dataExpedicaoIso") or "", reverse=True)
+        return records
+
+    if sort == "validade":
+        records.sort(key=lambda record: record.get("dataValidadeIso") or "9999-99-99")
+        return records
+
+    if sort == "nome":
+        records.sort(key=lambda record: norm_text(record.get("nomePessoa", "")))
+        return records
+
+    records.sort(key=lambda record: record.get("dataExpedicaoIso") or "", reverse=True)
+    records.sort(key=lambda record: record.get("_territory", {}).get("score", 0))
+    return records
+
+
+def summarize_records(records):
+    by_crp = {}
+    by_type = {}
+    orgao = 0
+    endereco_only = 0
+    expiring = 0
+
+    for record in records:
+        territory = record.get("_territory") or {}
+        unit = None
+
+        if territory.get("units"):
+            unit = territory["units"][0]
+        else:
+            unit = record.get("_inferredTerritory")
+
+        crp = unit["crp"] if unit else "Sem vínculo territorial"
+        by_crp[crp] = by_crp.get(crp, 0) + 1
+
+        record_type = record.get("descricaoPeca") or "Sem tipo"
+        by_type[record_type] = by_type.get(record_type, 0) + 1
+
+        if territory.get("orgao"):
+            orgao += 1
+        elif territory.get("endereco"):
+            endereco_only += 1
+
+        if validity_class(record) in {"90", "365"}:
+            expiring += 1
+
+    return {
+        "byCrp": by_crp,
+        "byType": by_type,
+        "orgao": orgao,
+        "enderecoOnly": endereco_only,
+        "expiring": expiring,
+    }
+
+
+def filter_records(records, filters):
+    q = norm_text(filters.get("q", ""))
+    filtered = []
+
+    for record in records:
+        territory = match_territory(record, filters)
+
+        if not territory.get("matches"):
+            continue
+
+        decorated = {**record, "_territory": territory}
+
+        if q and q not in decorated.get("_searchText", record_search_text(decorated)):
+            continue
+
+        if filters.get("type") and decorated.get("descricaoPeca") != filters["type"]:
+            continue
+
+        if filters.get("status") and decorated.get("status") != filters["status"]:
+            continue
+
+        if filters.get("validade") and validity_class(decorated) != filters["validade"]:
+            continue
+
+        if filters.get("tab") == "orgao" and not territory.get("orgao"):
+            continue
+
+        if filters.get("tab") == "endereco" and (
+            territory.get("orgao") or not territory.get("endereco")
+        ):
+            continue
+
+        filtered.append(decorated)
+
+    return filtered
+
+
+def paginated_records(query):
+    dataset = load_records()
+    records = dataset["records"]
+    size = query_int(query, "size", 50, minimum=1, maximum=200)
+    page = query_int(query, "page", 1, minimum=1)
+    filters = {
+        "q": query_value(query, "q"),
+        "crp": query_value(query, "crp"),
+        "unit": query_value(query, "unit"),
+        "origin": query_value(query, "origin", "ambos"),
+        "type": query_value(query, "type"),
+        "validade": query_value(query, "validade"),
+        "status": query_value(query, "status"),
+        "sort": query_value(query, "sort", "territorio"),
+        "tab": query_value(query, "tab", "todos"),
+    }
+
+    filtered = filter_records(records, filters)
+    sort_records(filtered, filters["sort"])
+
+    total = len(filtered)
+    total_pages = max(1, (total + size - 1) // size)
+    page = min(page, total_pages)
+    start = (page - 1) * size
+    end = start + size
+    page_records = [public_record(record) for record in filtered[start:end]]
+
+    return {
+        "records": page_records,
+        "meta": {
+            **dataset["meta"],
+            "facets": facets_for(records),
+            "summary": summarize_records(filtered),
+        },
+        "pagination": {
+            "page": page,
+            "size": size,
+            "total": total,
+            "totalPages": total_pages,
+            "start": start + 1 if total else 0,
+            "end": min(end, total),
         },
     }
 
@@ -346,7 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/mandados":
-            self.send_json(200, load_records())
+            self.send_json(200, paginated_records(parse_qs(parsed.query)))
             return
 
         if path == "/api/auth/status":

@@ -59,9 +59,15 @@
     .meta-row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:8px 0 10px;flex-wrap:wrap}
     .count{font-size:13px;color:var(--muted)}
     .count b{font-size:17px;color:var(--text)}
+    .page-range{margin-left:5px}
     .source-tabs{display:flex;gap:6px;flex-wrap:wrap}
     .tab{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--muted);font-weight:750}
     .tab.active{background:var(--blue);border-color:var(--blue);color:#fff}
+    .pager{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+    .pager-info{font-size:12px;color:var(--muted);font-weight:750}
+    .page-btn{min-width:38px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px;font-weight:800;padding:0 10px}
+    .page-btn.active{background:var(--blue);border-color:var(--blue);color:#fff}
+    .page-btn:disabled{opacity:.45;cursor:not-allowed}
     .section-title{display:flex;align-items:center;gap:8px;margin:18px 0 9px}
     .section-title h2{font-size:14px;margin:0}
     .section-title span{font-size:12px;color:var(--muted)}
@@ -114,7 +120,7 @@
     .adminbar .grow{flex:1}
     .footer{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding:15px 0 24px;text-align:center}
     @media(max-width:1060px){.filter-grid{grid-template-columns:1fr 1fr 1fr}.kpis{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:720px){.filter-grid,.summary{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.bar{grid-template-columns:110px 1fr 28px}.actions{grid-template-columns:1fr}.edit-grid{grid-template-columns:1fr}}
+    @media(max-width:720px){.filter-grid,.summary{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.bar{grid-template-columns:110px 1fr 28px}.actions{grid-template-columns:1fr}.edit-grid{grid-template-columns:1fr}.pager{justify-content:flex-start}}
   </style>
 </head>
 <body>
@@ -224,13 +230,14 @@
       </section>
     </div>
     <div class="meta-row">
-      <div class="count"><b id="shownText">0</b> mandados encontrados</div>
+      <div class="count"><b id="shownText">0</b> mandados encontrados<span class="page-range" id="pageText"></span></div>
       <div class="source-tabs">
         <button class="tab active" data-source-tab="todos">Todos</button>
         <button class="tab" data-source-tab="orgao">Órgão expedidor</button>
         <button class="tab" data-source-tab="endereco">Endereço informado</button>
       </div>
     </div>
+    <div class="pager" id="pager"></div>
     <section id="orgaoSection">
       <div class="section-title"><h2>Correspondência por órgão expedidor</h2><span id="orgaoCount">0</span></div>
       <div class="grid" id="orgaoGrid"></div>
@@ -296,7 +303,7 @@
     ];
     const ADMIN_PASS='admin123';
     const $=id=>document.getElementById(id);
-    const state={records:[],meta:{},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,admin:sessionStorage.getItem('pmto_admin')==='1',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
+    const state={records:[],meta:{},pagination:{page:1,size:50,total:0,totalPages:1,start:0,end:0},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,admin:sessionStorage.getItem('pmto_admin')==='1',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
     const unitById=Object.fromEntries(TERRITORIO.map(u=>[u.id,u]));
 
     function norm(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
@@ -337,38 +344,31 @@
     function recordSearchText(r){return norm([r.nomePessoa,r.cpf,r.nomeMae,r.nomePai,r.numeroProcesso,r.numeroPeca,r.orgaoExpedidor,r.enderecosPessoa,r.tipificacaoPenal].join(' '));}
     function priorityRank(id){const p=editFor(id).prioridade;return {Urgente:0,Alta:1,Média:2,Baixa:3,Normal:4}[p]??4;}
     function decoratedRecords(){
-      const q=norm(state.filters.q);
-      return state.records.map(record=>({...record,_territory:matchTerritory(record)})).filter(record=>{
-        if(!record._territory.matches)return false;
-        if(q&&!recordSearchText(record).includes(q))return false;
-        if(state.filters.type&&record.descricaoPeca!==state.filters.type)return false;
-        if(state.filters.status&&record.status!==state.filters.status)return false;
-        if(state.filters.validade&&validityClass(record)!==state.filters.validade)return false;
-        if(state.filters.tab==='orgao'&&!record._territory.orgao)return false;
-        if(state.filters.tab==='endereco'&&(record._territory.orgao||!record._territory.endereco))return false;
-        return true;
-      }).sort((a,b)=>{
-        if(state.filters.sort==='prioridade')return priorityRank(a.id)-priorityRank(b.id)||String(b.dataExpedicaoIso).localeCompare(String(a.dataExpedicaoIso));
-        if(state.filters.sort==='recentes')return String(b.dataExpedicaoIso).localeCompare(String(a.dataExpedicaoIso));
-        if(state.filters.sort==='validade')return String(a.dataValidadeIso||'9999-99-99').localeCompare(String(b.dataValidadeIso||'9999-99-99'));
-        if(state.filters.sort==='nome')return String(a.nomePessoa).localeCompare(String(b.nomePessoa),'pt-BR');
+      return state.records.map(record=>record._territory?record:{...record,_territory:matchTerritory(record)}).sort((a,b)=>{
         const pa=editFor(a.id).pinned?0:1,pb=editFor(b.id).pinned?0:1;
         if(pa!==pb)return pa-pb;
-        if(a._territory.score!==b._territory.score)return a._territory.score-b._territory.score;
-        return String(b.dataExpedicaoIso).localeCompare(String(a.dataExpedicaoIso));
+        if(state.filters.sort==='prioridade')return priorityRank(a.id)-priorityRank(b.id)||String(b.dataExpedicaoIso).localeCompare(String(a.dataExpedicaoIso));
+        return 0;
       });
     }
     function fillSelects(){
+      const facets=state.meta.facets||{};
       const crps=[...new Set(TERRITORIO.map(u=>u.crp))];
       $('fcrp').innerHTML='<option value="">Todo o Tocantins</option>'+crps.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+      $('fcrp').value=state.filters.crp;
       fillUnits();
-      $('ftipo').innerHTML='<option value="">Todos</option>'+[...new Set(state.records.map(r=>r.descricaoPeca).filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
-      $('fstatus').innerHTML='<option value="">Todos</option>'+[...new Set(state.records.map(r=>r.status).filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+      const types=facets.types||[...new Set(state.records.map(r=>r.descricaoPeca).filter(Boolean))].sort();
+      const statuses=facets.statuses||[...new Set(state.records.map(r=>r.status).filter(Boolean))].sort();
+      $('ftipo').innerHTML='<option value="">Todos</option>'+types.map(v=>`<option>${esc(v)}</option>`).join('');
+      $('ftipo').value=state.filters.type;
+      $('fstatus').innerHTML='<option value="">Todos</option>'+statuses.map(v=>`<option>${esc(v)}</option>`).join('');
+      $('fstatus').value=state.filters.status;
     }
     function fillUnits(){
       const units=state.filters.crp?TERRITORIO.filter(u=>u.crp===state.filters.crp):TERRITORIO;
       $('funidade').innerHTML='<option value="">Todas</option>'+units.map(u=>`<option value="${u.id}">${esc(u.unidade)} - ${esc(u.sede||u.cidade)}</option>`).join('');
       if(state.filters.unit&&!units.some(u=>u.id===state.filters.unit)){state.filters.unit='';$('funidade').value='';}
+      $('funidade').value=state.filters.unit;
     }
     function countBy(items,keyFn){
       const counts={};
@@ -435,33 +435,58 @@
         </div>
       </article>`;
     }
+    function sortedEntries(counts){
+      return Object.entries(counts||{}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    }
+    function renderPager(){
+      const p=state.pagination||{page:1,size:50,total:0,totalPages:1,start:0,end:0};
+      const totalPages=Math.max(1,p.totalPages||1);
+      const page=Math.min(Math.max(1,p.page||1),totalPages);
+      $('pageText').textContent=p.total?` · exibindo ${p.start}-${p.end}`:'';
+      const pages=[];
+      const first=Math.max(1,page-2);
+      const last=Math.min(totalPages,page+2);
+      for(let i=first;i<=last;i++)pages.push(i);
+      $('pager').innerHTML=`<span class="pager-info">Página ${page} de ${totalPages}</span>
+        <button class="page-btn" data-page="1" ${page<=1?'disabled':''}>Primeira</button>
+        <button class="page-btn" data-page="${page-1}" ${page<=1?'disabled':''}>Anterior</button>
+        ${pages.map(i=>`<button class="page-btn ${i===page?'active':''}" data-page="${i}">${i}</button>`).join('')}
+        <button class="page-btn" data-page="${page+1}" ${page>=totalPages?'disabled':''}>Próxima</button>
+        <button class="page-btn" data-page="${totalPages}" ${page>=totalPages?'disabled':''}>Última</button>`;
+    }
     function render(){
       document.documentElement.setAttribute('data-theme',state.theme);
       $('themeBtn').textContent=state.theme==='dark'?'Claro':'Escuro';
       $('adminBar').classList.toggle('on',state.admin);
       const data=decoratedRecords();
+      const summary=state.meta.summary||{};
+      const pagination=state.pagination||{};
+      const filteredTotal=pagination.total??data.length;
       const noTerritoryFilter=!state.filters.crp&&!state.filters.unit;
       const orgao=noTerritoryFilter?data:data.filter(r=>r._territory.orgao);
       const endereco=noTerritoryFilter?[]:data.filter(r=>!r._territory.orgao&&r._territory.endereco);
-      $('kTotal').textContent=state.records.length;
-      $('kShown').textContent=data.length;
-      $('kAddress').textContent=endereco.length;
+      $('kTotal').textContent=state.meta.total??filteredTotal;
+      $('kShown').textContent=filteredTotal;
+      $('kAddress').textContent=summary.enderecoOnly??endereco.length;
       $('kUrgent').textContent=data.filter(r=>['Alta','Urgente'].includes(editFor(r.id).prioridade)).length;
-      $('kExpiring').textContent=data.filter(r=>['90','365'].includes(validityClass(r))).length;
-      $('shownText').textContent=data.length;
-      $('orgaoCount').textContent=`${orgao.length} registros`;
-      $('enderecoCount').textContent=`${endereco.length} registros`;
+      $('kExpiring').textContent=summary.expiring??data.filter(r=>['90','365'].includes(validityClass(r))).length;
+      $('shownText').textContent=filteredTotal;
+      $('orgaoCount').textContent=`${orgao.length} nesta página`;
+      $('enderecoCount').textContent=`${endereco.length} nesta página`;
       document.querySelector('#orgaoSection .section-title h2').textContent=noTerritoryFilter?'Mandados da base':'Correspondência por órgão expedidor';
       $('orgaoGrid').innerHTML=orgao.map(card).join('');
       $('enderecoGrid').innerHTML=endereco.map(card).join('');
       $('orgaoSection').style.display=orgao.length?'block':'none';
       $('enderecoSection').style.display=endereco.length?'block':'none';
-      $('empty').classList.toggle('on',data.length===0);
-      bars($('byCrp'),countBy(data,r=>r._territory.units?.[0]?.crp||inferTerritory(r)?.crp||'Sem vínculo territorial'));
-      bars($('byType'),countBy(data,r=>r.descricaoPeca||'Sem tipo'));
+      $('empty').classList.toggle('on',filteredTotal===0);
+      const byCrp=summary.byCrp?Object.fromEntries(sortedEntries(summary.byCrp)):countBy(data,r=>r._territory.units?.[0]?.crp||inferTerritory(r)?.crp||'Sem vínculo territorial');
+      const byType=summary.byType?Object.fromEntries(sortedEntries(summary.byType)):countBy(data,r=>r.descricaoPeca||'Sem tipo');
+      bars($('byCrp'),byCrp);
+      bars($('byType'),byType);
       $('dataNotice').textContent=state.meta.warning||'';
       $('dataNotice').classList.toggle('on',Boolean(state.meta.warning));
       document.querySelectorAll('.tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.sourceTab===state.filters.tab));
+      renderPager();
     }
     function updateCookieUI(){
       const remaining=Math.max(0,Math.floor((state.expiresAt-Date.now())/1000));
@@ -486,9 +511,25 @@
       if(!res.ok){alert(data.error||'Cookie inválido.');return;}
       state.auth=true;state.expiresAt=Date.now()+(data.remainingSeconds||240)*1000;$('cookieInput').value='';$('cookieModal').classList.remove('on');updateCookieUI();render();
     }
-    async function loadData(){
-      const res=await fetch('/api/mandados');const data=await res.json();
-      state.records=data.records||[];state.meta=data.meta||{};fillSelects();render();
+    function mandadosParams(){
+      const params=new URLSearchParams();
+      params.set('page',state.pagination.page||1);
+      params.set('size',state.pagination.size||50);
+      for(const [key,value] of Object.entries(state.filters)){
+        if(value)params.set(key,value);
+      }
+      return params;
+    }
+    async function loadData(options={}){
+      if(options.resetPage)state.pagination.page=1;
+      const res=await fetch(`/api/mandados?${mandadosParams().toString()}`);
+      const data=await res.json();
+      if(!res.ok){alert(data.error||'Falha ao carregar mandados.');return;}
+      state.records=data.records||[];
+      state.meta=data.meta||{};
+      state.pagination=data.pagination||{page:1,size:50,total:state.records.length,totalPages:1,start:state.records.length?1:0,end:state.records.length};
+      fillSelects();
+      render();
     }
     async function downloadPdf(id,type){
       if(!state.auth){$('cookieModal').classList.add('on');return;}
@@ -507,8 +548,11 @@
         if(btn)btn.textContent='Baixar PDF do mandado';
       }
     }
-    function setFilter(id,key){$(id).addEventListener('change',e=>{state.filters[key]=e.target.value;if(key==='crp'){fillUnits();}render();});}
-    $('q').addEventListener('input',e=>{state.filters.q=e.target.value;render();});
+    let searchTimer=null;
+    function reloadFirstPage(){loadData({resetPage:true});}
+    function scheduleReload(){clearTimeout(searchTimer);searchTimer=setTimeout(reloadFirstPage,260);}
+    function setFilter(id,key){$(id).addEventListener('change',e=>{state.filters[key]=e.target.value;if(key==='crp'){fillUnits();}reloadFirstPage();});}
+    $('q').addEventListener('input',e=>{state.filters.q=e.target.value;scheduleReload();});
     setFilter('fcrp','crp');setFilter('funidade','unit');setFilter('forigem','origin');setFilter('ftipo','type');setFilter('fvalidade','validade');setFilter('fstatus','status');setFilter('fsort','sort');
     $('themeBtn').addEventListener('click',()=>{state.theme=state.theme==='dark'?'light':'dark';localStorage.setItem('pmto_theme',state.theme);render();});
     $('renewCookieBtn').addEventListener('click',()=>$('cookieModal').classList.add('on'));
@@ -519,8 +563,9 @@
     $('adminLoginBtn').addEventListener('click',()=>{if($('adminPass').value===ADMIN_PASS){state.admin=true;sessionStorage.setItem('pmto_admin','1');$('adminModal').classList.remove('on');$('adminPass').value='';render();}else alert('Senha incorreta.');});
     $('adminPass').addEventListener('keydown',e=>{if(e.key==='Enter')$('adminLoginBtn').click();});
     $('logoutAdminBtn').addEventListener('click',()=>{state.admin=false;sessionStorage.removeItem('pmto_admin');render();});
-    document.querySelectorAll('[data-source-tab]').forEach(btn=>btn.addEventListener('click',()=>{state.filters.tab=btn.dataset.sourceTab;render();}));
+    document.querySelectorAll('[data-source-tab]').forEach(btn=>btn.addEventListener('click',()=>{state.filters.tab=btn.dataset.sourceTab;reloadFirstPage();}));
     document.addEventListener('click',e=>{
+      const pageBtn=e.target.closest('[data-page]');if(pageBtn){state.pagination.page=Number(pageBtn.dataset.page)||1;loadData();window.scrollTo({top:0,behavior:'smooth'});return;}
       const dl=e.target.closest('[data-download]');if(dl){downloadPdf(dl.dataset.download,dl.dataset.type);return;}
       const save=e.target.closest('[data-save]');if(save){const id=save.dataset.save;const edit=editFor(id);document.querySelectorAll(`[data-id="${CSS.escape(id)}"][data-field]`).forEach(el=>{const f=el.dataset.field;edit[f]=el.type==='checkbox'?el.checked:el.value;});saveEdits();render();return;}
       const add=e.target.closest('[data-add-update]');if(add){const id=add.dataset.addUpdate;const input=document.querySelector(`[data-update-input="${CSS.escape(id)}"]`);const value=input.value.trim();if(value){const edit=editFor(id);edit.updates=edit.updates||[];const now=new Date();edit.updates.unshift({t:now.toLocaleDateString('pt-BR')+' '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),txt:value});saveEdits();render();}return;}
