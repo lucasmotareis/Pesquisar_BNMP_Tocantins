@@ -267,29 +267,32 @@
   </div>
 
   <script>
+    function area(id,crp,unidade,sede,cidades,aliases=[],exclusions=[]){
+      return {id,crp,unidade,sede,cidade:sede,cidades,aliases,exclusions};
+    }
     const TERRITORIO=[
-      {id:'cpc-1bpm',crp:'CPC',unidade:'1º BPM',cidade:'Palmas',aliases:['Palmas']},
-      {id:'cpc-6bpm',crp:'CPC',unidade:'6º BPM',cidade:'Palmas',aliases:['Palmas']},
-      {id:'cpc-13bpm',crp:'CPC',unidade:'13º BPM',cidade:'Taquaruçu',aliases:['Taquaruçu','Taquarucu']},
-      {id:'cpc-1cipm',crp:'CPC',unidade:'1ª CIPM',cidade:'Luzimangues',aliases:['Luzimangues']},
-      {id:'crp1-3bpm',crp:'CRP-1',unidade:'3º BPM',cidade:'Pedro Afonso',aliases:['Pedro Afonso']},
-      {id:'crp1-5bpm',crp:'CRP-1',unidade:'5º BPM',cidade:'Porto Nacional',aliases:['Porto Nacional']},
-      {id:'crp1-7bpm',crp:'CRP-1',unidade:'7º BPM',cidade:'Guaraí',aliases:['Guaraí','Guarai']},
-      {id:'crp1-8bpm',crp:'CRP-1',unidade:'8º BPM',cidade:'Paraíso do Tocantins',aliases:['Paraíso do Tocantins','Paraiso do Tocantins','Paraiso']},
-      {id:'crp1-4cipm',crp:'CRP-1',unidade:'4ª CIPM',cidade:'Lagoa da Confusão',aliases:['Lagoa da Confusão','Lagoa da Confusao']},
-      {id:'crp1-6cipm',crp:'CRP-1',unidade:'6ª CIPM',cidade:'Miracema',aliases:['Miracema','Miracema do Tocantins']},
-      {id:'crp2-2bpm',crp:'CRP-2',unidade:'2º BPM',cidade:'Araguaína',aliases:['Araguaína','Araguaina']},
-      {id:'crp2-9bpm',crp:'CRP-2',unidade:'9º BPM',cidade:'Araguatins',aliases:['Araguatins']},
-      {id:'crp2-14bpm',crp:'CRP-2',unidade:'14º BPM',cidade:'Colinas do Tocantins',aliases:['Colinas do Tocantins','Colinas']},
-      {id:'crp2-2cipm',crp:'CRP-2',unidade:'2ª CIPM',cidade:'Xambioá',aliases:['Xambioá','Xambioa']},
-      {id:'crp2-3cipm',crp:'CRP-2',unidade:'3ª CIPM',cidade:'Goiatins',aliases:['Goiatins']},
-      {id:'crp2-15bpm',crp:'CRP-2',unidade:'15º BPM',cidade:'Tocantinópolis',aliases:['Tocantinópolis','Tocantinopolis']},
-      {id:'crp3-4bpm',crp:'CRP-3',unidade:'4º BPM',cidade:'Gurupi',aliases:['Gurupi']},
-      {id:'crp3-10bpm',crp:'CRP-3',unidade:'10º BPM',cidade:'Arraias',aliases:['Arraias']},
-      {id:'crp3-11bpm',crp:'CRP-3',unidade:'11º BPM',cidade:'Dianópolis',aliases:['Dianópolis','Dianopolis']},
-      {id:'crp3-12bpm',crp:'CRP-3',unidade:'12º BPM',cidade:'Taguatinga',aliases:['Taguatinga','Taguatinga do Tocantins']},
-      {id:'crp3-7cipm',crp:'CRP-3',unidade:'7ª CIPM',cidade:'Alvorada',aliases:['Alvorada']},
-      {id:'crp3-8cipm',crp:'CRP-3',unidade:'8ª CIPM',cidade:'Palmeirópolis',aliases:['Palmeirópolis','Palmeiropolis']}
+      area('cpc-1bpm','CPC','1º BPM','Palmas',['Palmas']),
+      area('cpc-6bpm','CPC','6º BPM','Palmas',['Palmas'],['Taquaralto','Região Sul de Palmas']),
+      area('cpc-13bpm','CPC','13º BPM','Taquaruçu',['Taquaruçu','Aparecida do Rio Negro','Lagoa do Tocantins','Lizarda','Mateiros','Novo Acordo','Pindorama do Tocantins','Ponte Alta do Tocantins','Santa Tereza do Tocantins','São Félix do Tocantins']),
+      area('cpc-1cipm','CPC','1ª CIPM','Luzimangues',['Luzimangues']),
+      area('crp1-3bpm','CRP-1','3º BPM','Pedro Afonso',['Bom Jesus do Tocantins','Centenário','Itacajá','Itapiratins','Pedro Afonso','Recursolândia','Rio Sono','Santa Maria do Tocantins','Tupirama']),
+      area('crp1-5bpm','CRP-1','5º BPM','Porto Nacional',['Brejinho de Nazaré','Ipueiras','Monte do Carmo','Porto Nacional','Santa Rosa do Tocantins','Silvanópolis']),
+      area('crp1-7bpm','CRP-1','7º BPM','Guaraí',['Colmeia','Couto Magalhães','Goianorte','Guaraí','Itaporã do Tocantins','Pequizeiro','Presidente Kennedy','Tabocão','Tupiratins']),
+      area('crp1-8bpm','CRP-1','8º BPM','Paraíso do Tocantins',['Abreulândia','Araguacema','Barrolândia','Caseara','Chapada de Areia','Divinópolis do Tocantins','Dois Irmãos do Tocantins','Marianópolis do Tocantins','Monte Santo do Tocantins','Paraíso do Tocantins','Pugmil'],['Paraíso','Paraiso']),
+      area('crp1-4cipm','CRP-1','4ª CIPM','Lagoa da Confusão',['Cristalândia','Fátima','Lagoa da Confusão','Nova Rosalândia','Oliveira de Fátima','Pium','Santa Rita do Tocantins']),
+      area('crp1-16bpm','CRP-1','16º BPM','Miracema do Tocantins',['Lajeado','Miracema do Tocantins','Miranorte','Rio dos Bois','Tocantínia'],['Miracema']),
+      area('crp2-2bpm','CRP-2','2º BPM','Araguaína',['Araguaína']),
+      area('crp2-9bpm','CRP-2','9º BPM','Araguatins',['Araguatins','Augustinópolis','Axixá do Tocantins','Buriti do Tocantins','Carrasco Bonito','Esperantina','Itaguatins','Maurilândia do Tocantins','Praia Norte','Sampaio','São Bento do Tocantins','São Miguel do Tocantins','São Sebastião do Tocantins','Sítio Novo do Tocantins']),
+      area('crp2-14bpm','CRP-2','14º BPM','Colinas do Tocantins',['Arapoema','Bandeirantes do Tocantins','Bernardo Sayão','Brasilândia do Tocantins','Colinas do Tocantins','Juarina','Nova Olinda','Palmeirante','Pau D’Arco'],['Colinas','Pau Darco']),
+      area('crp2-2cipm','CRP-2','2ª CIPM','Xambioá',['Aragominas','Araguanã','Carmolândia','Darcinópolis','Muricilândia','Piraquê','Santa Fé do Araguaia','Wanderlândia','Xambioá']),
+      area('crp2-3cipm','CRP-2','3ª CIPM','Goiatins',['Babaçulândia','Barra do Ouro','Campos Lindos','Filadélfia','Goiatins']),
+      area('crp2-15bpm','CRP-2','15º BPM','Tocantinópolis',['Aguiarnópolis','Ananás','Angico','Cachoeirinha','Luzinópolis','Nazaré','Palmeiras do Tocantins','Riachinho','Santa Terezinha do Tocantins','Tocantinópolis'],[],['Brejinho de Nazaré']),
+      area('crp3-4bpm','CRP-3','4º BPM','Gurupi',['Aliança do Tocantins','Cariri do Tocantins','Crixás do Tocantins','Dueré','Formoso do Araguaia','Gurupi','Peixe','Sucupira']),
+      area('crp3-10bpm','CRP-3','10º BPM','Arraias',['Arraias','Combinado','Conceição do Tocantins','Novo Alegre','Taipas do Tocantins']),
+      area('crp3-11bpm','CRP-3','11º BPM','Dianópolis',['Almas','Chapada da Natividade','Dianópolis','Natividade','Porto Alegre do Tocantins','Rio da Conceição'],[],['São Valério','São Valério da Natividade']),
+      area('crp3-12bpm','CRP-3','12º BPM','Taguatinga',['Aurora do Tocantins','Lavandeira','Novo Jardim','Ponte Alta do Bom Jesus','Taguatinga']),
+      area('crp3-7cipm','CRP-3','7ª CIPM','Alvorada',['Alvorada','Araguaçu','Figueirópolis','Sandolândia','Talismã']),
+      area('crp3-8cipm','CRP-3','8ª CIPM','Palmeirópolis',['Jaú do Tocantins','Palmeirópolis','Paraná','São Salvador do Tocantins','São Valério'],['São Valério da Natividade'])
     ];
     const ADMIN_PASS='admin123';
     const $=id=>document.getElementById(id);
@@ -303,7 +306,19 @@
     function daysUntil(iso){if(!iso)return null;const today=new Date();today.setHours(0,0,0,0);const d=new Date(iso+'T00:00:00');return Math.round((d-today)/86400000);}
     function validityClass(record){const days=daysUntil(record.dataValidadeIso);if(days===null)return 'sem';if(days<0)return 'vencido';if(days<=90)return '90';if(days<=365)return '365';return 'ok';}
     function validityLabel(record){const cls=validityClass(record);if(cls==='sem')return 'sem validade';if(cls==='vencido')return 'vencido';if(cls==='90')return 'vence em 90 dias';if(cls==='365')return 'vence em 12 meses';return 'válido';}
-    function hasAlias(text,aliases){const source=norm(text);return aliases.some(alias=>source.includes(norm(alias)));}
+    function cityVariants(name){return [name];}
+    function unitTerms(unit){
+      const cities=(unit.cidades||[]).flatMap(cityVariants);
+      return [...new Set([unit.sede,unit.cidade,...cities,...(unit.aliases||[])].filter(Boolean))];
+    }
+    function hasAlias(text,aliases){
+      const source=` ${norm(text)} `;
+      return aliases.map(norm).filter(Boolean).some(alias=>source.includes(` ${alias} `));
+    }
+    function hasTerritory(text,unit){
+      if(hasAlias(text,unit.exclusions||[]))return false;
+      return hasAlias(text,unitTerms(unit));
+    }
     function activeUnits(){if(state.filters.unit)return [unitById[state.filters.unit]].filter(Boolean);if(state.filters.crp)return TERRITORIO.filter(u=>u.crp===state.filters.crp);return [];}
     function matchTerritory(record){
       const units=activeUnits();
@@ -311,8 +326,8 @@
       const matches=[];
       let orgao=false,endereco=false;
       for(const unit of units){
-        const om=hasAlias(record.orgaoExpedidor,unit.aliases);
-        const em=hasAlias(record.enderecosPessoa,unit.aliases);
+        const om=hasTerritory(record.orgaoExpedidor,unit);
+        const em=hasTerritory(record.enderecosPessoa,unit);
         if(om||em){matches.push({...unit,orgao:om,endereco:em});orgao=orgao||om;endereco=endereco||em;}
       }
       if(state.filters.origin==='orgao'&&!orgao)return {matches:false};
@@ -352,7 +367,7 @@
     }
     function fillUnits(){
       const units=state.filters.crp?TERRITORIO.filter(u=>u.crp===state.filters.crp):TERRITORIO;
-      $('funidade').innerHTML='<option value="">Todas</option>'+units.map(u=>`<option value="${u.id}">${esc(u.unidade)} - ${esc(u.cidade)}</option>`).join('');
+      $('funidade').innerHTML='<option value="">Todas</option>'+units.map(u=>`<option value="${u.id}">${esc(u.unidade)} - ${esc(u.sede||u.cidade)}</option>`).join('');
       if(state.filters.unit&&!units.some(u=>u.id===state.filters.unit)){state.filters.unit='';$('funidade').value='';}
     }
     function countBy(items,keyFn){
@@ -373,7 +388,7 @@
       return '';
     }
     function inferTerritory(record){
-      return TERRITORIO.find(unit=>hasAlias(record.orgaoExpedidor,unit.aliases)||hasAlias(record.enderecosPessoa,unit.aliases));
+      return TERRITORIO.find(unit=>hasTerritory(record.orgaoExpedidor,unit)||hasTerritory(record.enderecosPessoa,unit));
     }
     function priorityClass(priority){return priority==='Média'?'Media':priority;}
     function card(record){
@@ -384,7 +399,7 @@
       const valid=validityClass(record);
       const validClass=valid==='vencido'?'red':(valid==='90'||valid==='365'?'amber':'green');
       const type=record.descricaoPeca||'Mandado';
-      const origem=record._territory.units?.length?record._territory.units.map(u=>`${u.unidade} - ${u.cidade}`).join(', '):'';
+      const origem=record._territory.units?.length?record._territory.units.map(u=>`${u.unidade} - ${u.sede||u.cidade}`).join(', '):'';
       const updates=(edit.updates||[]).map(u=>`<div class="line"><b>${esc(u.t)}</b> ${esc(u.txt)}</div>`).join('');
       const extra=[edit.paradeiro?`<div class="extra"><div class="k">Provável paradeiro</div>${esc(edit.paradeiro)}</div>`:'',edit.info?`<div class="extra"><div class="k">Informações</div>${esc(edit.info)}</div>`:'',updates?`<div class="extra"><div class="k">Atualizações</div>${updates}</div>`:''].join('');
       return `<article class="${cls.join(' ')}" data-id="${record.id}">
