@@ -96,7 +96,9 @@ mandados_processados.json
 
 ## Cookie BNMP
 
-O cookie `portalbnmp` e informado no painel e fica somente em memoria no servidor local. O temporizador do site considera 4 minutos para renovacao.
+O cookie `portalbnmp` e solicitado somente quando o usuario clica em `Baixar PDF do mandado`. Ele fica somente em memoria no servidor e o temporizador do site considera 4 minutos para renovacao.
+
+Para obter o cookie, acesse `https://portalbnmp.cnj.jus.br/`, valide o Captcha, abra as ferramentas de desenvolvedor com `F12`, entre em `Application`/`Aplicação`, abra `Cookies`, selecione `https://portalbnmp.cnj.jus.br/` e copie o valor do item `portalbnmp`.
 
 ## Download de PDF
 

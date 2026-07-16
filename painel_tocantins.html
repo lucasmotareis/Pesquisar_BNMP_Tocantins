@@ -110,17 +110,23 @@
     .empty.on{display:block}
     .modal{position:fixed;inset:0;background:rgba(6,13,24,.72);display:none;align-items:center;justify-content:center;z-index:100;padding:18px}
     .modal.on{display:flex}
-    .box{width:520px;max-width:100%;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 24px 60px rgba(0,0,0,.34);padding:18px}
+    .box{width:560px;max-width:100%;max-height:92vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 24px 60px rgba(0,0,0,.34);padding:18px}
     .box h2{margin:0 0 6px;font-size:18px}
     .box p{margin:0 0 12px;color:var(--muted);font-size:13px}
-    .box .row{display:grid;grid-template-columns:1fr auto;gap:8px}
+    .box .row{display:grid;grid-template-columns:1fr auto auto;gap:8px}
     .primary{height:38px;border:0;border-radius:8px;background:var(--blue);color:#fff;padding:0 14px;font-weight:850}
+    .secondary{height:38px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--text);padding:0 12px;font-weight:800}
+    .cookie-help{border:1px solid var(--line);border-radius:8px;background:var(--surface-2);padding:10px 12px;margin:10px 0 12px;font-size:12px;color:var(--muted)}
+    .cookie-help summary{cursor:pointer;color:var(--text);font-weight:850}
+    .cookie-help ol{margin:8px 0 0;padding-left:18px}
+    .cookie-help li{margin:5px 0}
+    .cookie-help a{color:var(--blue-2);font-weight:800}
     .adminbar{display:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px;align-items:center;gap:8px;flex-wrap:wrap}
     .adminbar.on{display:flex}
     .adminbar .grow{flex:1}
     .footer{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding:15px 0 24px;text-align:center}
     @media(max-width:1060px){.filter-grid{grid-template-columns:1fr 1fr 1fr}.kpis{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:720px){.filter-grid,.summary{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.bar{grid-template-columns:110px 1fr 28px}.actions{grid-template-columns:1fr}.edit-grid{grid-template-columns:1fr}.pager{justify-content:flex-start}}
+    @media(max-width:720px){.filter-grid,.summary{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.bar{grid-template-columns:110px 1fr 28px}.actions{grid-template-columns:1fr}.edit-grid{grid-template-columns:1fr}.pager{justify-content:flex-start}.box .row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -137,7 +143,6 @@
         </div>
         <div class="head-actions">
           <span class="cookie-chip bad" id="cookieStatus">Cookie pendente</span>
-          <button class="head-btn" id="renewCookieBtn">Renovar cookie</button>
           <button class="head-btn" id="reloadBtn">Recarregar dados</button>
           <button class="head-btn" id="adminBtn">Administrador</button>
           <button class="head-btn" id="themeBtn">Escuro</button>
@@ -254,10 +259,21 @@
   <div class="modal" id="cookieModal">
     <div class="box">
       <h2>Autenticação BNMP</h2>
-      <p>Cole o cookie portalbnmp da sessão atual. O acesso fica ativo por 4 minutos.</p>
+      <p>Informe o cookie apenas para baixar o PDF do mandado. Ele fica em memória por 4 minutos.</p>
+      <details class="cookie-help" open>
+        <summary>Como pegar o cookie portalbnmp</summary>
+        <ol>
+          <li>Acesse <a href="https://portalbnmp.cnj.jus.br/" target="_blank" rel="noopener">portalbnmp.cnj.jus.br</a> e valide o Captcha.</li>
+          <li>Abra as ferramentas de desenvolvedor com <b>F12</b>.</li>
+          <li>Entre em <b>Application</b> ou <b>Aplicação</b>.</li>
+          <li>Abra <b>Cookies</b> e selecione <b>https://portalbnmp.cnj.jus.br/</b>.</li>
+          <li>Procure o nome <b>portalbnmp</b>, copie o valor e cole abaixo.</li>
+        </ol>
+      </details>
       <div class="row">
-        <input id="cookieInput" type="password" placeholder="portalbnmp=...">
-        <button class="primary" id="saveCookieBtn">Entrar</button>
+        <input id="cookieInput" type="password" placeholder="Cole o valor do portalbnmp ou portalbnmp=...">
+        <button class="primary" id="saveCookieBtn">Baixar</button>
+        <button class="secondary" id="closeCookieBtn">Agora não</button>
       </div>
     </div>
   </div>
@@ -303,7 +319,7 @@
     ];
     const ADMIN_PASS='admin123';
     const $=id=>document.getElementById(id);
-    const state={records:[],meta:{},pagination:{page:1,size:50,total:0,totalPages:1,start:0,end:0},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,admin:sessionStorage.getItem('pmto_admin')==='1',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
+    const state={records:[],meta:{},pagination:{page:1,size:50,total:0,totalPages:1,start:0,end:0},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,pendingDownload:null,admin:sessionStorage.getItem('pmto_admin')==='1',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
     const unitById=Object.fromEntries(TERRITORIO.map(u=>[u.id,u]));
 
     function norm(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
@@ -417,7 +433,7 @@
         <div class="badges"><span class="badge ${validClass}">${esc(validityLabel(record))}</span><span class="badge">${esc(record.status||'Status não informado')}</span></div>
         ${extra}
         <div class="actions">
-          <button class="download" data-download="${record.id}" data-type="${record.idTipoPeca}" ${state.auth?'':'disabled'}>Baixar PDF do mandado</button>
+          <button class="download" data-download="${record.id}" data-type="${record.idTipoPeca}">Baixar PDF do mandado</button>
           <button class="small-btn" data-edit="${record.id}">${state.admin?'Editar':'Detalhes'}</button>
         </div>
         <div class="edit ${state.admin?'on':''}">
@@ -491,12 +507,24 @@
     function updateCookieUI(){
       const remaining=Math.max(0,Math.floor((state.expiresAt-Date.now())/1000));
       if(!state.auth||remaining<=0){
-        state.auth=false;$('cookieStatus').textContent='Cookie pendente';$('cookieStatus').className='cookie-chip bad';$('cookieModal').classList.add('on');render();return;
+        const wasAuth=state.auth;
+        state.auth=false;$('cookieStatus').textContent='Cookie pendente';$('cookieStatus').className='cookie-chip bad';
+        if(wasAuth)render();
+        return;
       }
       const min=String(Math.floor(remaining/60)).padStart(2,'0');
       const sec=String(remaining%60).padStart(2,'0');
       $('cookieStatus').textContent=`Cookie ${min}:${sec}`;
       $('cookieStatus').className='cookie-chip '+(remaining<=30?'warn':'ok');
+    }
+    function openCookieModal(download=null){
+      state.pendingDownload=download;
+      $('cookieModal').classList.add('on');
+      setTimeout(()=>$('cookieInput').focus(),0);
+    }
+    function closeCookieModal(){
+      state.pendingDownload=null;
+      $('cookieModal').classList.remove('on');
     }
     async function loadStatus(){
       const res=await fetch('/api/auth/status');const data=await res.json();
@@ -509,7 +537,9 @@
       const res=await fetch('/api/auth/cookie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie})});
       const data=await res.json();
       if(!res.ok){alert(data.error||'Cookie inválido.');return;}
-      state.auth=true;state.expiresAt=Date.now()+(data.remainingSeconds||240)*1000;$('cookieInput').value='';$('cookieModal').classList.remove('on');updateCookieUI();render();
+      const pending=state.pendingDownload;
+      state.auth=true;state.expiresAt=Date.now()+(data.remainingSeconds||240)*1000;state.pendingDownload=null;$('cookieInput').value='';$('cookieModal').classList.remove('on');updateCookieUI();render();
+      if(pending)downloadPdf(pending.id,pending.type);
     }
     function mandadosParams(){
       const params=new URLSearchParams();
@@ -532,12 +562,12 @@
       render();
     }
     async function downloadPdf(id,type){
-      if(!state.auth){$('cookieModal').classList.add('on');return;}
+      if(!state.auth){openCookieModal({id,type});return;}
       const btn=document.querySelector(`[data-download="${CSS.escape(String(id))}"]`);
       if(btn)btn.textContent='Baixando...';
       try{
         const res=await fetch(`/api/pdf/${encodeURIComponent(id)}/${encodeURIComponent(type)}`);
-        if(res.status===401){state.auth=false;updateCookieUI();const data=await res.json().catch(()=>({}));alert(data.error||'Cookie expirado.');return;}
+        if(res.status===401){state.auth=false;updateCookieUI();const data=await res.json().catch(()=>({}));alert(data.error||'Cookie expirado. Cole um novo cookie para tentar novamente.');openCookieModal({id,type});return;}
         if(!res.ok){const data=await res.json().catch(()=>({error:'Falha ao baixar PDF.'}));alert(data.error||'Falha ao baixar PDF.');return;}
         const blob=await res.blob();
         const record=state.records.find(r=>String(r.id)===String(id))||{};
@@ -555,8 +585,8 @@
     $('q').addEventListener('input',e=>{state.filters.q=e.target.value;scheduleReload();});
     setFilter('fcrp','crp');setFilter('funidade','unit');setFilter('forigem','origin');setFilter('ftipo','type');setFilter('fvalidade','validade');setFilter('fstatus','status');setFilter('fsort','sort');
     $('themeBtn').addEventListener('click',()=>{state.theme=state.theme==='dark'?'light':'dark';localStorage.setItem('pmto_theme',state.theme);render();});
-    $('renewCookieBtn').addEventListener('click',()=>$('cookieModal').classList.add('on'));
     $('saveCookieBtn').addEventListener('click',saveCookie);
+    $('closeCookieBtn').addEventListener('click',closeCookieModal);
     $('cookieInput').addEventListener('keydown',e=>{if(e.key==='Enter')saveCookie();});
     $('reloadBtn').addEventListener('click',loadData);
     $('adminBtn').addEventListener('click',()=>{if(state.admin){state.admin=false;sessionStorage.removeItem('pmto_admin');render();return;}$('adminModal').classList.add('on');$('adminPass').focus();});
