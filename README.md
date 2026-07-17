@@ -75,23 +75,41 @@ docker compose up -d --build
 No Coolify, use este repositorio como app Docker Compose. O servico expõe a porta interna `8765`.
 Ao configurar dominio/proxy no Coolify, aponte para o servico `painel-bnmp` na porta `8765`.
 
+O arquivo `mandados_processados.json` nao entra no Git. Se o painel abrir com `0` registros e a mensagem `Nenhum arquivo de dados encontrado`, significa que a VPS/container nao esta enxergando esse arquivo.
+
 Para os dados, configure uma variavel ou volume:
 
 - opcao simples: criar uma montagem persistente apontando para `/app/data`;
 - dentro dessa montagem, colocar `mandados_processados.json`;
-- opcionalmente definir `BNMP_DATA_PATH` no Compose/Coolify para apontar para uma pasta da VPS que contenha o JSON.
+- opcionalmente definir `BNMP_DATA_PATH` no Compose/Coolify para apontar para uma pasta da VPS que contenha o JSON;
+- opcionalmente definir `BNMP_DATA_FILE=/app/data/mandados_processados.json`.
 
 Exemplo de variaveis:
 
 ```text
 APP_PORT=8765
 BNMP_DATA_PATH=/caminho/na/vps/dados-bnmp
+BNMP_DATA_FILE=/app/data/mandados_processados.json
 ```
 
 Dentro de `/caminho/na/vps/dados-bnmp`, deixe:
 
 ```text
 mandados_processados.json
+```
+
+Exemplo na VPS:
+
+```bash
+mkdir -p /opt/bnmp-data
+# envie/copiei o arquivo local mandados_processados.json para:
+# /opt/bnmp-data/mandados_processados.json
+```
+
+Depois configure no Coolify:
+
+```text
+BNMP_DATA_PATH=/opt/bnmp-data
 ```
 
 ## Cookie BNMP

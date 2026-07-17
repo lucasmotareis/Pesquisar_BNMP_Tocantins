@@ -18,17 +18,37 @@ except ImportError:  # pragma: no cover
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("BNMP_DATA_DIR", ROOT)).resolve()
 HTML_FILE = ROOT / "painel_tocantins.html"
-DATA_FILES = [
-    DATA_DIR / "mandados_processados.json",
-    DATA_DIR / "pecas_autorizadas.json",
-]
-if DATA_DIR != ROOT:
-    DATA_FILES.extend(
-        [
-            ROOT / "mandados_processados.json",
-            ROOT / "pecas_autorizadas.json",
-        ]
-    )
+
+
+def unique_paths(paths):
+    seen = set()
+    result = []
+
+    for path in paths:
+        resolved = Path(path).resolve()
+
+        if resolved in seen:
+            continue
+
+        seen.add(resolved)
+        result.append(resolved)
+
+    return result
+
+
+DATA_FILES = unique_paths(
+    [
+        *(
+            [Path(os.environ["BNMP_DATA_FILE"])]
+            if os.environ.get("BNMP_DATA_FILE")
+            else []
+        ),
+        DATA_DIR / "mandados_processados.json",
+        DATA_DIR / "pecas_autorizadas.json",
+        ROOT / "mandados_processados.json",
+        ROOT / "pecas_autorizadas.json",
+    ]
+)
 BNMP_API = "https://portalbnmp.pdpj.jus.br/bnmpportal/api"
 COOKIE_TTL_SECONDS = 4 * 60
 
@@ -723,13 +743,19 @@ def load_records():
             break
 
     if payload is None:
+        checked_files = ", ".join(str(path) for path in DATA_FILES)
         result = {
             "records": [],
             "meta": {
                 "sourceFile": "",
                 "processed": False,
                 "generatedAt": datetime.now().isoformat(timespec="seconds"),
-                "warning": "Nenhum arquivo de dados encontrado.",
+                "dataFilesChecked": [str(path) for path in DATA_FILES],
+                "warning": (
+                    "Nenhum arquivo de dados encontrado. Coloque "
+                    "mandados_processados.json em /app/data no container "
+                    f"ou defina BNMP_DATA_FILE. Caminhos verificados: {checked_files}"
+                ),
             },
         }
         RECORD_CACHE["key"] = None
@@ -763,6 +789,8 @@ def load_records():
         "records": records,
         "meta": {
             "sourceFile": source.name,
+            "sourcePath": str(source),
+            "dataFilesChecked": [str(path) for path in DATA_FILES],
             "processed": processed,
             "total": len(records),
             "generatedAt": datetime.now().isoformat(timespec="seconds"),

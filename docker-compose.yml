@@ -7,6 +7,7 @@ services:
     environment:
       TZ: America/Sao_Paulo
       BNMP_DATA_DIR: /app/data
+      BNMP_DATA_FILE: /app/data/mandados_processados.json
       PYTHONUNBUFFERED: "1"
     ports:
       - "${APP_PORT:-8765}:8765"
