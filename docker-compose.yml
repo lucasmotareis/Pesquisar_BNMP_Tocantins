@@ -8,8 +8,9 @@ services:
       TZ: America/Sao_Paulo
       BNMP_DATA_DIR: /app/data
       BNMP_DATA_FILE: /app/data/mandados_processados.json
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin123}"
       PYTHONUNBUFFERED: "1"
     ports:
       - "${APP_PORT:-8765}:8765"
     volumes:
-      - "${BNMP_DATA_PATH:-./data}:/app/data:ro"
+      - "${BNMP_DATA_PATH:-./data}:/app/data"

@@ -219,9 +219,11 @@
     <div class="adminbar" id="adminBar">
       <b>Modo administrador ativo</b>
       <span class="grow"></span>
+      <button class="small-btn" id="uploadDataBtn">Enviar base JSON</button>
       <button class="small-btn" id="exportBtn">Exportar backup</button>
       <button class="small-btn" id="importBtn">Importar backup</button>
       <button class="small-btn" id="logoutAdminBtn">Sair</button>
+      <input type="file" id="dataFile" accept="application/json" style="display:none">
       <input type="file" id="importFile" accept="application/json" style="display:none">
     </div>
     <div class="summary">
@@ -317,9 +319,8 @@
       area('crp3-7cipm','CRP-3','7ª CIPM','Alvorada',['Alvorada','Araguaçu','Figueirópolis','Sandolândia','Talismã']),
       area('crp3-8cipm','CRP-3','8ª CIPM','Palmeirópolis',['Jaú do Tocantins','Palmeirópolis','Paraná','São Salvador do Tocantins','São Valério'],['São Valério da Natividade'])
     ];
-    const ADMIN_PASS='admin123';
     const $=id=>document.getElementById(id);
-    const state={records:[],meta:{},pagination:{page:1,size:50,total:0,totalPages:1,start:0,end:0},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,pendingDownload:null,admin:sessionStorage.getItem('pmto_admin')==='1',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
+    const state={records:[],meta:{},pagination:{page:1,size:50,total:0,totalPages:1,start:0,end:0},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,pendingDownload:null,admin:sessionStorage.getItem('pmto_admin')==='1',adminPassword:sessionStorage.getItem('pmto_admin_pass')||'',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
     const unitById=Object.fromEntries(TERRITORIO.map(u=>[u.id,u]));
 
     function norm(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
@@ -589,10 +590,17 @@
     $('closeCookieBtn').addEventListener('click',closeCookieModal);
     $('cookieInput').addEventListener('keydown',e=>{if(e.key==='Enter')saveCookie();});
     $('reloadBtn').addEventListener('click',loadData);
-    $('adminBtn').addEventListener('click',()=>{if(state.admin){state.admin=false;sessionStorage.removeItem('pmto_admin');render();return;}$('adminModal').classList.add('on');$('adminPass').focus();});
-    $('adminLoginBtn').addEventListener('click',()=>{if($('adminPass').value===ADMIN_PASS){state.admin=true;sessionStorage.setItem('pmto_admin','1');$('adminModal').classList.remove('on');$('adminPass').value='';render();}else alert('Senha incorreta.');});
+    $('adminBtn').addEventListener('click',()=>{if(state.admin){state.admin=false;state.adminPassword='';sessionStorage.removeItem('pmto_admin');sessionStorage.removeItem('pmto_admin_pass');render();return;}$('adminModal').classList.add('on');$('adminPass').focus();});
+    async function loginAdmin(){
+      const pass=$('adminPass').value;
+      const res=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pass})});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok){alert(data.error||'Senha incorreta.');return;}
+      state.admin=true;state.adminPassword=pass;sessionStorage.setItem('pmto_admin','1');sessionStorage.setItem('pmto_admin_pass',pass);$('adminModal').classList.remove('on');$('adminPass').value='';render();
+    }
+    $('adminLoginBtn').addEventListener('click',loginAdmin);
     $('adminPass').addEventListener('keydown',e=>{if(e.key==='Enter')$('adminLoginBtn').click();});
-    $('logoutAdminBtn').addEventListener('click',()=>{state.admin=false;sessionStorage.removeItem('pmto_admin');render();});
+    $('logoutAdminBtn').addEventListener('click',()=>{state.admin=false;state.adminPassword='';sessionStorage.removeItem('pmto_admin');sessionStorage.removeItem('pmto_admin_pass');render();});
     document.querySelectorAll('[data-source-tab]').forEach(btn=>btn.addEventListener('click',()=>{state.filters.tab=btn.dataset.sourceTab;reloadFirstPage();}));
     document.addEventListener('click',e=>{
       const pageBtn=e.target.closest('[data-page]');if(pageBtn){state.pagination.page=Number(pageBtn.dataset.page)||1;loadData();window.scrollTo({top:0,behavior:'smooth'});return;}
@@ -601,6 +609,8 @@
       const add=e.target.closest('[data-add-update]');if(add){const id=add.dataset.addUpdate;const input=document.querySelector(`[data-update-input="${CSS.escape(id)}"]`);const value=input.value.trim();if(value){const edit=editFor(id);edit.updates=edit.updates||[];const now=new Date();edit.updates.unshift({t:now.toLocaleDateString('pt-BR')+' '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),txt:value});saveEdits();render();}return;}
     });
     $('exportBtn').addEventListener('click',()=>{const blob=new Blob([JSON.stringify({meta:{exportado:new Date().toISOString(),app:'Painel PMTO'},edits:state.edits},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup-painel-pmto-'+new Date().toISOString().slice(0,10)+'.json';a.click();URL.revokeObjectURL(a.href);});
+    $('uploadDataBtn').addEventListener('click',()=>$('dataFile').click());
+    $('dataFile').addEventListener('change',event=>{const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{JSON.parse(reader.result);const ok=confirm(`Enviar ${file.name} como base de mandados do painel?`);if(!ok)return;const res=await fetch('/api/data/upload',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':state.adminPassword},body:reader.result});const data=await res.json().catch(()=>({}));if(!res.ok){alert(data.error||'Falha ao enviar a base.');return;}alert(`Base importada: ${data.total||0} registros.`);loadData({resetPage:true});}catch(error){alert('Arquivo JSON inválido.');}finally{event.target.value='';}};reader.readAsText(file);});
     $('importBtn').addEventListener('click',()=>$('importFile').click());
     $('importFile').addEventListener('change',event=>{const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result);state.edits=parsed.edits||parsed;saveEdits();render();alert('Backup importado.');}catch(error){alert('Arquivo inválido.');}};reader.readAsText(file);event.target.value='';});
     Promise.all([loadData(),loadStatus()]).then(()=>setInterval(updateCookieUI,1000));

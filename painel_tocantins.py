@@ -51,6 +51,7 @@ DATA_FILES = unique_paths(
 )
 BNMP_API = "https://portalbnmp.pdpj.jus.br/bnmpportal/api"
 COOKIE_TTL_SECONDS = 4 * 60
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
 AUTH = {
     "cookie": "",
@@ -803,6 +804,57 @@ def load_records():
     return result
 
 
+def clear_record_cache():
+    RECORD_CACHE["key"] = None
+    RECORD_CACHE["data"] = None
+
+
+def default_data_file():
+    configured = os.environ.get("BNMP_DATA_FILE")
+
+    if configured:
+        return Path(configured).resolve()
+
+    return (DATA_DIR / "mandados_processados.json").resolve()
+
+
+def is_data_file_path_allowed(path):
+    path = Path(path).resolve()
+    allowed_dirs = [DATA_DIR, ROOT]
+
+    return any(path == directory or directory in path.parents for directory in allowed_dirs)
+
+
+def write_data_file(raw_body):
+    try:
+        payload = json.loads(raw_body.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        return None, f"JSON invalido: {error}"
+
+    if not isinstance(payload, (list, dict)):
+        return None, "O arquivo precisa conter uma lista JSON ou um objeto JSON."
+
+    target = default_data_file()
+
+    if target.name not in {"mandados_processados.json", "pecas_autorizadas.json"}:
+        return None, "BNMP_DATA_FILE deve apontar para mandados_processados.json ou pecas_autorizadas.json."
+
+    if not is_data_file_path_allowed(target):
+        return None, "Caminho de dados fora do diretorio permitido."
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as error:
+        return None, f"Nao foi possivel salvar o arquivo em {target}: {error}"
+
+    clear_record_cache()
+    return target, ""
+
+
 def query_value(query, key, default=""):
     values = query.get(key)
 
@@ -1069,6 +1121,14 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8")
         return json.loads(body or "{}")
 
+    def read_body(self):
+        length = int(self.headers.get("Content-Length") or "0")
+
+        if length <= 0:
+            return b""
+
+        return self.rfile.read(length)
+
     def serve_html(self):
         if not HTML_FILE.exists():
             self.send_json(500, {"error": "painel_tocantins.html nao encontrado."})
@@ -1084,7 +1144,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Password")
         self.end_headers()
 
     def do_GET(self):
@@ -1125,6 +1185,20 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
+        if path == "/api/admin/login":
+            try:
+                payload = self.read_json()
+            except json.JSONDecodeError:
+                self.send_json(400, {"error": "JSON invalido."})
+                return
+
+            if payload.get("password", "") != ADMIN_PASSWORD:
+                self.send_json(403, {"error": "Senha administrativa invalida."})
+                return
+
+            self.send_json(200, {"ok": True})
+            return
+
         if path == "/api/auth/cookie":
             try:
                 payload = self.read_json()
@@ -1151,6 +1225,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/auth/logout":
             clear_cookie()
             self.send_json(200, {"authenticated": False, "remainingSeconds": 0})
+            return
+
+        if path == "/api/data/upload":
+            if self.headers.get("X-Admin-Password", "") != ADMIN_PASSWORD:
+                self.send_json(403, {"error": "Senha administrativa invalida."})
+                return
+
+            target, error = write_data_file(self.read_body())
+
+            if error:
+                self.send_json(400, {"error": error})
+                return
+
+            loaded = load_records()
+            self.send_json(
+                200,
+                {
+                    "ok": True,
+                    "sourceFile": target.name,
+                    "sourcePath": str(target),
+                    "total": loaded["meta"].get("total", 0),
+                },
+            )
             return
 
         self.send_json(404, {"error": "Rota nao encontrada."})

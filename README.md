@@ -79,7 +79,7 @@ O arquivo `mandados_processados.json` nao entra no Git. Se o painel abrir com `0
 
 Para os dados, configure uma variavel ou volume:
 
-- opcao simples: criar uma montagem persistente apontando para `/app/data`;
+- opcao simples: criar uma montagem persistente gravavel apontando para `/app/data`;
 - dentro dessa montagem, colocar `mandados_processados.json`;
 - opcionalmente definir `BNMP_DATA_PATH` no Compose/Coolify para apontar para uma pasta da VPS que contenha o JSON;
 - opcionalmente definir `BNMP_DATA_FILE=/app/data/mandados_processados.json`.
@@ -90,6 +90,7 @@ Exemplo de variaveis:
 APP_PORT=8765
 BNMP_DATA_PATH=/caminho/na/vps/dados-bnmp
 BNMP_DATA_FILE=/app/data/mandados_processados.json
+ADMIN_PASSWORD=admin123
 ```
 
 Dentro de `/caminho/na/vps/dados-bnmp`, deixe:
@@ -111,6 +112,10 @@ Depois configure no Coolify:
 ```text
 BNMP_DATA_PATH=/opt/bnmp-data
 ```
+
+Tambem e possivel enviar a base pelo proprio painel: entre em `Administrador` e use `Enviar base JSON`. Para isso, a montagem de `/app/data` precisa estar gravavel e persistente no Coolify.
+
+A senha administrativa padrao e `admin123`. Em producao, defina `ADMIN_PASSWORD` no Coolify e use essa senha ao entrar no modo `Administrador`.
 
 ## Cookie BNMP
 

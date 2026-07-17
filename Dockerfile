@@ -3,7 +3,8 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     BNMP_DATA_DIR=/app/data \
-    BNMP_DATA_FILE=/app/data/mandados_processados.json
+    BNMP_DATA_FILE=/app/data/mandados_processados.json \
+    ADMIN_PASSWORD=admin123
 
 WORKDIR /app
 
