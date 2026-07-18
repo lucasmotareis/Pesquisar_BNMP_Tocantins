@@ -35,6 +35,7 @@ CAPTURED_SESSION_MAX_AGE_SECONDS = int(
 )
 AUTH_CAPTURE_STORAGE_KEY = "bnmpCapturedAuthorization"
 AUTH_CAPTURED_AT_STORAGE_KEY = "bnmpCapturedAuthorizationAt"
+AUTH_CAPTURE_SOURCE_STORAGE_KEY = "bnmpCapturedAuthorizationSource"
 API_PROBE_PATHS = (
     "/bnmpportal/api/dominio/estados",
     "/bnmpportal/api/dominio/sexos",
@@ -51,18 +52,59 @@ AUTH_CAPTURE_SCRIPT = f"""
 
     const tokenKey = {json.dumps(AUTH_CAPTURE_STORAGE_KEY)};
     const capturedAtKey = {json.dumps(AUTH_CAPTURED_AT_STORAGE_KEY)};
+    const sourceKey = {json.dumps(AUTH_CAPTURE_SOURCE_STORAGE_KEY)};
+    const portalCookieName = {json.dumps(PORTAL_COOKIE_NAME)};
+
+    const looksLikeToken = (value) => {{
+      const token = String(value || '').replace(/^Bearer\\s+/i, '').trim();
+      return token && token.split('.').length === 3 && token.length > 80;
+    }};
 
     const saveToken = (value, source) => {{
       const token = String(value || '').replace(/^Bearer\\s+/i, '').trim();
-      if (!token || token.split('.').length !== 3 || token.length < 80) {{
+      if (!looksLikeToken(token)) {{
         return;
       }}
 
       try {{
         window.localStorage.setItem(tokenKey, token);
         window.localStorage.setItem(capturedAtKey, String(Date.now()));
-        window.localStorage.setItem('bnmpCapturedAuthorizationSource', source || '');
+        window.localStorage.setItem(sourceKey, source || '');
       }} catch (error) {{}}
+    }};
+
+    const saveTokenFromJsonText = (text, source) => {{
+      if (!text || typeof text !== 'string') {{
+        return;
+      }}
+
+      try {{
+        const data = JSON.parse(text);
+        if (data && typeof data === 'object') {{
+          saveToken(data.idToken || data.Authorization || data.authorization || data.token, source);
+        }}
+      }} catch (error) {{}}
+    }};
+
+    const saveTokenFromCookieAssignment = (value) => {{
+      const raw = String(value || '');
+      const firstPart = raw.split(';')[0] || '';
+      const separator = firstPart.indexOf('=');
+      if (separator < 1) {{
+        return;
+      }}
+
+      const name = firstPart.slice(0, separator).trim();
+      const cookieValue = firstPart.slice(separator + 1).trim();
+      if (name !== portalCookieName) {{
+        return;
+      }}
+
+      try {{
+        saveToken(decodeURIComponent(cookieValue), 'document.cookie');
+      }} catch (error) {{
+        saveToken(cookieValue, 'document.cookie');
+      }}
     }};
 
     const readHeader = (headers) => {{
@@ -80,6 +122,14 @@ AUTH_CAPTURE_SCRIPT = f"""
       const wrappedFetch = function(...args) {{
         return originalFetch.apply(this, args).then((response) => {{
           saveToken(readHeader(response.headers), 'fetch');
+          try {{
+            const url = String(response.url || args[0]?.url || args[0] || '');
+            if (url.includes('/api/recaptcha')) {{
+              response.clone().text().then((body) => {{
+                saveTokenFromJsonText(body, 'fetch-body:/api/recaptcha');
+              }}).catch(() => {{}});
+            }}
+          }} catch (error) {{}}
           return response;
         }});
       }};
@@ -87,15 +137,76 @@ AUTH_CAPTURE_SCRIPT = f"""
       window.fetch = wrappedFetch;
     }}
 
+    const wrapCookieSetter = (cookieProto) => {{
+      if (!cookieProto || cookieProto.__bnmpCookieCaptureWrapped) {{
+        return;
+      }}
+
+      const descriptor = Object.getOwnPropertyDescriptor(cookieProto, 'cookie');
+      if (!descriptor || !descriptor.configurable || typeof descriptor.set !== 'function') {{
+        return;
+      }}
+
+      Object.defineProperty(cookieProto, 'cookie', {{
+        configurable: descriptor.configurable,
+        enumerable: descriptor.enumerable,
+        get: function() {{
+          return descriptor.get ? descriptor.get.call(this) : '';
+        }},
+        set: function(value) {{
+          saveTokenFromCookieAssignment(value);
+          return descriptor.set.call(this, value);
+        }}
+      }});
+      cookieProto.__bnmpCookieCaptureWrapped = true;
+    }};
+
+    wrapCookieSetter(window.Document && window.Document.prototype);
+    wrapCookieSetter(window.HTMLDocument && window.HTMLDocument.prototype);
+
     const proto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
     if (proto && !proto.__bnmpCaptureWrapped) {{
       const originalOpen = proto.open;
       const originalSend = proto.send;
+      const originalGetResponseHeader = proto.getResponseHeader;
+      const originalGetAllResponseHeaders = proto.getAllResponseHeaders;
+
+      const saveHeaderBlock = (headers, source) => {{
+        String(headers || '').split(/\\r?\\n/).forEach((line) => {{
+          const separator = line.indexOf(':');
+          if (separator < 0) {{
+            return;
+          }}
+
+          const name = line.slice(0, separator).trim().toLowerCase();
+          if (name === 'authorization') {{
+            saveToken(line.slice(separator + 1), source);
+          }}
+        }});
+      }};
 
       proto.open = function(method, url, ...rest) {{
         this.__bnmpCaptureUrl = url;
         return originalOpen.call(this, method, url, ...rest);
       }};
+
+      if (typeof originalGetResponseHeader === 'function') {{
+        proto.getResponseHeader = function(name) {{
+          const value = originalGetResponseHeader.call(this, name);
+          if (String(name || '').toLowerCase() === 'authorization') {{
+            saveToken(value, 'xhr-get-response-header');
+          }}
+          return value;
+        }};
+      }}
+
+      if (typeof originalGetAllResponseHeaders === 'function') {{
+        proto.getAllResponseHeaders = function() {{
+          const headers = originalGetAllResponseHeaders.call(this);
+          saveHeaderBlock(headers, 'xhr-all-response-headers');
+          return headers;
+        }};
+      }}
 
       proto.send = function(...args) {{
         this.addEventListener('readystatechange', function() {{
@@ -109,6 +220,10 @@ AUTH_CAPTURE_SCRIPT = f"""
                 this.getResponseHeader('authorization'),
               'xhr'
             );
+            saveHeaderBlock(this.getAllResponseHeaders && this.getAllResponseHeaders(), 'xhr');
+            if (String(this.__bnmpCaptureUrl || '').includes('/api/recaptcha')) {{
+              saveTokenFromJsonText(this.responseText, 'xhr-body:/api/recaptcha');
+            }}
           }} catch (error) {{}}
         }});
         return originalSend.apply(this, args);
@@ -322,6 +437,34 @@ def is_bnmp_url(url: str) -> bool:
     return host.endswith("portalbnmp.pdpj.jus.br") or host.endswith(
         "portalbnmp.cnj.jus.br"
     )
+
+
+def is_recaptcha_url(url: str) -> bool:
+    parsed = urlparse(url or "")
+    return is_bnmp_url(url) and parsed.path.endswith("/api/recaptcha")
+
+
+def token_from_json_body(value: str) -> str:
+    if not value:
+        return ""
+
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return ""
+
+    candidates: list[Any] = []
+
+    if isinstance(data, dict):
+        for key in ("idToken", "Authorization", "authorization", "token"):
+            candidates.append(data.get(key))
+
+    for candidate in candidates:
+        token = normalize_authorization_token(str(candidate or ""))
+        if looks_like_bnmp_token(token):
+            return token
+
+    return ""
 
 
 def cookie_is_fresh(cookie: dict[str, Any]) -> bool:
@@ -594,6 +737,29 @@ def read_captured_authorization(session: CDPSession) -> str:
     return token
 
 
+def read_auth_capture_source(session: CDPSession) -> str:
+    try:
+        return str(
+            evaluate(
+                session,
+                f"""
+                (() => {{
+                  try {{
+                    return window.localStorage.getItem(
+                      {json.dumps(AUTH_CAPTURE_SOURCE_STORAGE_KEY)}
+                    ) || '';
+                  }} catch (error) {{
+                    return '';
+                  }}
+                }})()
+                """,
+            )
+            or ""
+        ).strip()
+    except CDPError:
+        return ""
+
+
 def write_cookie_to_page(session: CDPSession, token: str) -> bool:
     max_age = max(60, CAPTURED_SESSION_MAX_AGE_SECONDS)
     expression = f"""
@@ -615,6 +781,15 @@ def write_cookie_to_page(session: CDPSession, token: str) -> bool:
         return False
 
 
+def auth_capture_flags(source: str) -> dict[str, Any]:
+    return {
+        "authorizationCaptureSource": source,
+        "cookieSetterCaptured": source == "document.cookie",
+        "recaptchaResponseCaptured": "/api/recaptcha" in source,
+        "recaptchaBodyCaptured": "body:/api/recaptcha" in source,
+    }
+
+
 def prepare_browser_for_capture() -> dict[str, Any]:
     wait_for_browser()
     targets = fetch_json(f"{CDP_BASE_URL}/json/list")
@@ -625,6 +800,7 @@ def prepare_browser_for_capture() -> dict[str, Any]:
         current_url = current_page_url(session, str(target.get("url", "")))
         installed = install_auth_capture(session)
         token = read_captured_authorization(session)
+        auth_capture_source = read_auth_capture_source(session)
 
         if token:
             write_cookie_to_page(session, token)
@@ -639,6 +815,7 @@ def prepare_browser_for_capture() -> dict[str, Any]:
         "ok": True,
         "authCaptureInstalled": installed,
         "authorizationTokenInStorage": bool(token),
+        **auth_capture_flags(auth_capture_source),
         "portalCookiePresent": has_cookie_named(cookies, PORTAL_COOKIE_NAME),
         "fingerprintPresent": bool(fingerprint),
         "currentUrl": current_url,
@@ -667,6 +844,7 @@ def snapshot_browser_state(
         if captured_token:
             write_cookie_to_page(session, captured_token)
             cookies.append(cookie_from_token(captured_token, current_url))
+        auth_capture_source = read_auth_capture_source(session)
 
         fingerprint = read_fingerprint(session)
         user_agent = evaluate(session, "navigator.userAgent") or ""
@@ -688,6 +866,7 @@ def snapshot_browser_state(
         "authorizationHeaderCaptured": bool(extra_cookies),
         "authCaptureInstalled": auth_capture_installed,
         "authorizationTokenInStorage": bool(captured_token),
+        **auth_capture_flags(auth_capture_source),
         "targetUrls": [
             str(item.get("url", ""))
             for item in targets
@@ -723,6 +902,7 @@ def extract_browser_session() -> dict[str, Any]:
         fingerprint = read_fingerprint(session)
         api_probe_result = {}
         captured_token = read_captured_authorization(session)
+        auth_capture_source = read_auth_capture_source(session)
         if captured_token:
             write_cookie_to_page(session, captured_token)
 
@@ -753,6 +933,7 @@ def extract_browser_session() -> dict[str, Any]:
             cookies, current_url = wait_for_browser_cookies(session, BNMP_PORTAL_URL)
             fingerprint = read_fingerprint(session) or fingerprint
             captured_token = read_captured_authorization(session) or captured_token
+            auth_capture_source = read_auth_capture_source(session) or auth_capture_source
 
             if captured_token and not has_cookie_named(cookies, PORTAL_COOKIE_NAME):
                 cookies.append(cookie_from_token(captured_token, current_url))
@@ -786,6 +967,7 @@ def extract_browser_session() -> dict[str, Any]:
         "postCaptchaNavigationTried": post_captcha_navigation_tried,
         "authCaptureInstalled": auth_capture_installed,
         "authorizationTokenInStorage": bool(captured_token),
+        **auth_capture_flags(auth_capture_source),
         "apiRequestProbeRan": bool(api_probe_result.get("apiRequestProbeRan")),
         "apiRequestUrls": api_probe_result.get("apiRequestUrls", []),
         "requestCookieHeaderCaptured": bool(
@@ -852,18 +1034,27 @@ def saved_session_is_fresh(session_data: dict[str, Any]) -> bool:
     return age.total_seconds() <= CAPTURED_SESSION_MAX_AGE_SECONDS
 
 
-def save_authorization_session(token: str, source_url: str = "") -> bool:
+def save_authorization_session(
+    token: str,
+    source_url: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> bool:
     if not looks_like_bnmp_token(token):
         return False
 
     cookie = cookie_from_token(token, source_url)
+    session_metadata = {
+        "authorizationHeaderCaptured": True,
+        "authorizationSourceUrl": source_url,
+    }
+
+    if metadata:
+        session_metadata.update(metadata)
+
     session_data = snapshot_browser_state(
         [cookie],
         source_url,
-        {
-            "authorizationHeaderCaptured": True,
-            "authorizationSourceUrl": source_url,
-        },
+        session_metadata,
     )
     save_session(session_data)
     return True
@@ -936,6 +1127,15 @@ def public_summary(session_data: dict[str, Any]) -> dict[str, Any]:
         "authorizationTokenInStorage": bool(
             session_data.get("authorizationTokenInStorage")
         ),
+        "authorizationCaptureSource": session_data.get(
+            "authorizationCaptureSource",
+            "",
+        ),
+        "cookieSetterCaptured": bool(session_data.get("cookieSetterCaptured")),
+        "recaptchaResponseCaptured": bool(
+            session_data.get("recaptchaResponseCaptured")
+        ),
+        "recaptchaBodyCaptured": bool(session_data.get("recaptchaBodyCaptured")),
         "apiRequestProbeRan": bool(session_data.get("apiRequestProbeRan")),
         "apiRequestUrls": session_data.get("apiRequestUrls", []),
         "exportedAt": session_data.get("exportedAt", ""),
@@ -995,6 +1195,9 @@ def headers_from_network_event(
         url = request_urls.get(request_id, "")
         return headers if isinstance(headers, dict) else {}, url
 
+    if method == "Network.loadingFinished":
+        return {}, request_urls.get(request_id, "")
+
     response = params.get("response") or {}
     headers = params.get("headers") or response.get("headers") or {}
     url = str(
@@ -1003,10 +1206,55 @@ def headers_from_network_event(
         or request_urls.get(request_id, "")
     )
 
+    if request_id and url:
+        request_urls[request_id] = url
+
     if not isinstance(headers, dict):
         return {}, url
 
     return headers, url
+
+
+def capture_session_from_response_body(
+    session: CDPSession,
+    message: dict[str, Any],
+    url: str,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    params = message.get("params", {})
+    request_id = str(params.get("requestId") or "")
+
+    if not request_id or not is_recaptcha_url(url):
+        return False
+
+    body_result = safe_call(
+        session,
+        "Network.getResponseBody",
+        {"requestId": request_id},
+    )
+    body = str(body_result.get("body") or "")
+
+    if body_result.get("base64Encoded"):
+        try:
+            body = base64.b64decode(body).decode("utf-8", errors="replace")
+        except (ValueError, OSError):
+            body = ""
+
+    token = token_from_json_body(body)
+
+    if not token:
+        return False
+
+    return save_authorization_session(
+        token,
+        url,
+        {
+            "authorizationHeaderCaptured": False,
+            "recaptchaBodyCaptured": True,
+            "authorizationCaptureSource": "network-body:/api/recaptcha",
+            **(metadata or {}),
+        },
+    )
 
 
 def capture_session_from_network_headers(
@@ -1020,7 +1268,15 @@ def capture_session_from_network_headers(
     authorization = header_value(headers, "authorization")
 
     if authorization and looks_like_bnmp_token(authorization):
-        return save_authorization_session(authorization, url)
+        return save_authorization_session(
+            authorization,
+            url,
+            {
+                "authorizationCaptureSource": "network-header",
+                "recaptchaResponseCaptured": is_recaptcha_url(url),
+                **(metadata or {}),
+            },
+        )
 
     set_cookie = header_value(headers, "set-cookie")
     cookies = cookies_from_set_cookie_header(set_cookie, url)
@@ -1100,6 +1356,7 @@ def capture_api_probe_requests(
             "Network.requestWillBeSentExtraInfo",
             "Network.responseReceived",
             "Network.responseReceivedExtraInfo",
+            "Network.loadingFinished",
         }:
             continue
 
@@ -1110,6 +1367,17 @@ def capture_api_probe_requests(
 
         if capture_session_from_network_headers(
             headers,
+            url,
+            {"apiRequestProbeRan": True, "apiRequestUrls": seen_urls[:20]},
+        ):
+            captured = True
+
+        if method in {
+            "Network.responseReceived",
+            "Network.loadingFinished",
+        } and capture_session_from_response_body(
+            session,
+            message,
             url,
             {"apiRequestProbeRan": True, "apiRequestUrls": seen_urls[:20]},
         ):
@@ -1148,6 +1416,7 @@ def monitor_authorization_headers() -> None:
                     "Network.requestWillBeSentExtraInfo",
                     "Network.responseReceived",
                     "Network.responseReceivedExtraInfo",
+                    "Network.loadingFinished",
                 }:
                     continue
 
@@ -1155,6 +1424,21 @@ def monitor_authorization_headers() -> None:
                 if capture_session_from_network_headers(headers, url):
                     print(
                         f"Sessao BNMP capturada por headers de rede: {url}",
+                        flush=True,
+                    )
+                    continue
+
+                if method in {
+                    "Network.responseReceived",
+                    "Network.loadingFinished",
+                } and capture_session_from_response_body(
+                    session,
+                    message,
+                    url,
+                    {"recaptchaResponseCaptured": True},
+                ):
+                    print(
+                        f"Sessao BNMP capturada pelo corpo do recaptcha: {url}",
                         flush=True,
                     )
         except Exception as error:

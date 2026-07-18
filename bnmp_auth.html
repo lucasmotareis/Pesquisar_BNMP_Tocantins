@@ -173,6 +173,7 @@
         $('remotePlaceholder').style.display='grid';
       }
       if(data.browserExportConfigured){
+        $('configText').textContent='Preparando captura do navegador remoto antes do captcha...';
         prepareRemoteCapture().catch(()=>setNotice('Nao foi possivel preparar a captura do navegador remoto.'));
       }
     }
@@ -184,7 +185,9 @@
         return;
       }
       if(data.authCaptureInstalled){
-        $('configText').textContent+=' Captura preparada antes do captcha.';
+        $('configText').textContent='Captura preparada antes do captcha. Resolva o captcha no navegador remoto e depois importe a sessao.';
+      }else{
+        $('configText').textContent='Navegador remoto respondeu, mas a captura automatica ainda nao foi confirmada.';
       }
     }
     async function refreshStatus(){

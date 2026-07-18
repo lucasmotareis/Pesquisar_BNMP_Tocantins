@@ -1214,6 +1214,29 @@ def remote_export_error_detail(payload, fallback_text):
             f"{'sim' if payload.get('authorizationTokenInStorage') else 'nao'}"
         )
 
+    if payload.get("authorizationCaptureSource"):
+        diagnostics.append(
+            f"fonte authorization: {payload['authorizationCaptureSource']}"
+        )
+
+    if "cookieSetterCaptured" in payload:
+        diagnostics.append(
+            "cookie setter: "
+            f"{'sim' if payload.get('cookieSetterCaptured') else 'nao'}"
+        )
+
+    if "recaptchaResponseCaptured" in payload:
+        diagnostics.append(
+            "recaptcha response: "
+            f"{'sim' if payload.get('recaptchaResponseCaptured') else 'nao'}"
+        )
+
+    if "recaptchaBodyCaptured" in payload:
+        diagnostics.append(
+            "recaptcha body: "
+            f"{'sim' if payload.get('recaptchaBodyCaptured') else 'nao'}"
+        )
+
     if "requestCookieHeaderCaptured" in payload:
         diagnostics.append(
             "cookie em request: "
