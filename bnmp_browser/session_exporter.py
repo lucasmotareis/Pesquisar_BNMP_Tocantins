@@ -35,6 +35,13 @@ CAPTURED_SESSION_MAX_AGE_SECONDS = int(
 )
 AUTH_CAPTURE_STORAGE_KEY = "bnmpCapturedAuthorization"
 AUTH_CAPTURED_AT_STORAGE_KEY = "bnmpCapturedAuthorizationAt"
+API_PROBE_PATHS = (
+    "/bnmpportal/api/dominio/estados",
+    "/bnmpportal/api/dominio/sexos",
+    "/bnmpportal/api/dominio/tipo-documentos",
+    "/bnmpportal/api/dominio/tipo-pecas",
+    "/bnmpportal/api/pesquisa-pecas/orgaos",
+)
 AUTH_CAPTURE_SCRIPT = f"""
 (() => {{
   try {{
@@ -310,6 +317,22 @@ def cookie_from_token(token: str, current_url: str = "") -> dict[str, Any]:
     return cookie
 
 
+def is_bnmp_url(url: str) -> bool:
+    host = urlparse(url or "").hostname or ""
+    return host.endswith("portalbnmp.pdpj.jus.br") or host.endswith(
+        "portalbnmp.cnj.jus.br"
+    )
+
+
+def cookie_is_fresh(cookie: dict[str, Any]) -> bool:
+    expires = cookie.get("expires")
+
+    if isinstance(expires, (int, float)):
+        return expires > time.time() + 5
+
+    return True
+
+
 def dedupe_cookies(cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     seen = set()
@@ -355,6 +378,10 @@ def cookies_from_document_cookie(raw_cookie: str, current_url: str) -> list[dict
         )
 
     return cookies
+
+
+def cookies_from_cookie_header(value: str, current_url: str = "") -> list[dict[str, Any]]:
+    return cookies_from_document_cookie(value or "", current_url or BNMP_PORTAL_URL)
 
 
 def cookies_from_set_cookie_header(value: str, current_url: str = "") -> list[dict[str, Any]]:
@@ -619,7 +646,11 @@ def prepare_browser_for_capture() -> dict[str, Any]:
     }
 
 
-def snapshot_browser_state(extra_cookies=None, source_url: str = "") -> dict[str, Any]:
+def snapshot_browser_state(
+    extra_cookies=None,
+    source_url: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     wait_for_browser()
     targets = fetch_json(f"{CDP_BASE_URL}/json/list")
     target = pick_page_target(targets)
@@ -644,7 +675,7 @@ def snapshot_browser_state(extra_cookies=None, source_url: str = "") -> dict[str
     finally:
         session.close()
 
-    return {
+    session_data = {
         "cookies": dedupe_cookies(cookies),
         "fingerprint": fingerprint,
         "userAgent": user_agent,
@@ -664,6 +695,11 @@ def snapshot_browser_state(extra_cookies=None, source_url: str = "") -> dict[str
         ][:10],
         "exportedAt": datetime.now(timezone.utc).isoformat(),
     }
+
+    if metadata:
+        session_data.update(metadata)
+
+    return session_data
 
 
 def extract_browser_session() -> dict[str, Any]:
@@ -685,6 +721,7 @@ def extract_browser_session() -> dict[str, Any]:
         current_url = current_page_url(session, current_url)
         auth_capture_installed = install_auth_capture(session)
         fingerprint = read_fingerprint(session)
+        api_probe_result = {}
         captured_token = read_captured_authorization(session)
         if captured_token:
             write_cookie_to_page(session, captured_token)
@@ -692,6 +729,17 @@ def extract_browser_session() -> dict[str, Any]:
         cookies, current_url = wait_for_browser_cookies(session, current_url)
         if captured_token and not has_cookie_named(cookies, PORTAL_COOKIE_NAME):
             cookies.append(cookie_from_token(captured_token, current_url))
+
+        if not has_cookie_named(cookies, PORTAL_COOKIE_NAME):
+            api_probe_result = capture_api_probe_requests(session)
+            saved_session = read_saved_session()
+
+            if (
+                saved_session
+                and has_portal_cookie(saved_session)
+                and saved_session_is_fresh(saved_session)
+            ):
+                cookies.extend(saved_session.get("cookies", []))
 
         if (
             not has_cookie_named(cookies, PORTAL_COOKIE_NAME)
@@ -708,6 +756,17 @@ def extract_browser_session() -> dict[str, Any]:
 
             if captured_token and not has_cookie_named(cookies, PORTAL_COOKIE_NAME):
                 cookies.append(cookie_from_token(captured_token, current_url))
+
+            if not has_cookie_named(cookies, PORTAL_COOKIE_NAME):
+                api_probe_result = capture_api_probe_requests(session)
+                saved_session = read_saved_session()
+
+                if (
+                    saved_session
+                    and has_portal_cookie(saved_session)
+                    and saved_session_is_fresh(saved_session)
+                ):
+                    cookies.extend(saved_session.get("cookies", []))
 
         user_agent = evaluate(session, "navigator.userAgent") or ""
         page_title = evaluate(session, "document.title") or target.get("title", "")
@@ -727,6 +786,11 @@ def extract_browser_session() -> dict[str, Any]:
         "postCaptchaNavigationTried": post_captcha_navigation_tried,
         "authCaptureInstalled": auth_capture_installed,
         "authorizationTokenInStorage": bool(captured_token),
+        "apiRequestProbeRan": bool(api_probe_result.get("apiRequestProbeRan")),
+        "apiRequestUrls": api_probe_result.get("apiRequestUrls", []),
+        "requestCookieHeaderCaptured": bool(
+            api_probe_result.get("requestCookieHeaderCaptured")
+        ),
         "targetUrls": [
             str(item.get("url", ""))
             for item in targets
@@ -793,7 +857,41 @@ def save_authorization_session(token: str, source_url: str = "") -> bool:
         return False
 
     cookie = cookie_from_token(token, source_url)
-    session_data = snapshot_browser_state([cookie], source_url)
+    session_data = snapshot_browser_state(
+        [cookie],
+        source_url,
+        {
+            "authorizationHeaderCaptured": True,
+            "authorizationSourceUrl": source_url,
+        },
+    )
+    save_session(session_data)
+    return True
+
+
+def save_cookie_header_session(
+    cookies: list[dict[str, Any]],
+    source_url: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    portal_cookies = [
+        cookie
+        for cookie in cookies
+        if cookie.get("name") == PORTAL_COOKIE_NAME and cookie_is_fresh(cookie)
+    ]
+
+    if not portal_cookies:
+        return False
+
+    session_metadata = {
+        "requestCookieHeaderCaptured": True,
+        "requestCookieSourceUrl": source_url,
+    }
+
+    if metadata:
+        session_metadata.update(metadata)
+
+    session_data = snapshot_browser_state(portal_cookies, source_url, session_metadata)
     save_session(session_data)
     return True
 
@@ -831,10 +929,15 @@ def public_summary(session_data: dict[str, Any]) -> dict[str, Any]:
         "authorizationHeaderCaptured": bool(
             session_data.get("authorizationHeaderCaptured")
         ),
+        "requestCookieHeaderCaptured": bool(
+            session_data.get("requestCookieHeaderCaptured")
+        ),
         "authCaptureInstalled": bool(session_data.get("authCaptureInstalled")),
         "authorizationTokenInStorage": bool(
             session_data.get("authorizationTokenInStorage")
         ),
+        "apiRequestProbeRan": bool(session_data.get("apiRequestProbeRan")),
+        "apiRequestUrls": session_data.get("apiRequestUrls", []),
         "exportedAt": session_data.get("exportedAt", ""),
     }
 
@@ -869,11 +972,36 @@ def header_value(headers: dict[str, Any], name: str) -> str:
     return ""
 
 
-def headers_from_network_event(message: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def headers_from_network_event(
+    message: dict[str, Any],
+    request_urls: dict[str, str],
+) -> tuple[dict[str, Any], str]:
     params = message.get("params", {})
+    method = message.get("method")
+    request_id = str(params.get("requestId") or "")
+
+    if method == "Network.requestWillBeSent":
+        request = params.get("request") or {}
+        url = str(request.get("url") or params.get("documentURL") or "")
+
+        if request_id and url:
+            request_urls[request_id] = url
+
+        headers = request.get("headers") or {}
+        return headers if isinstance(headers, dict) else {}, url
+
+    if method == "Network.requestWillBeSentExtraInfo":
+        headers = params.get("headers") or {}
+        url = request_urls.get(request_id, "")
+        return headers if isinstance(headers, dict) else {}, url
+
     response = params.get("response") or {}
     headers = params.get("headers") or response.get("headers") or {}
-    url = str(response.get("url") or params.get("url") or "")
+    url = str(
+        response.get("url")
+        or params.get("url")
+        or request_urls.get(request_id, "")
+    )
 
     if not isinstance(headers, dict):
         return {}, url
@@ -881,7 +1009,14 @@ def headers_from_network_event(message: dict[str, Any]) -> tuple[dict[str, Any],
     return headers, url
 
 
-def capture_session_from_network_headers(headers: dict[str, Any], url: str) -> bool:
+def capture_session_from_network_headers(
+    headers: dict[str, Any],
+    url: str,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    if url and not is_bnmp_url(url):
+        return False
+
     authorization = header_value(headers, "authorization")
 
     if authorization and looks_like_bnmp_token(authorization):
@@ -891,17 +1026,106 @@ def capture_session_from_network_headers(headers: dict[str, Any], url: str) -> b
     cookies = cookies_from_set_cookie_header(set_cookie, url)
 
     for cookie in cookies:
-        if cookie.get("name") == PORTAL_COOKIE_NAME:
-            session_data = snapshot_browser_state(cookies, url)
+        if cookie.get("name") == PORTAL_COOKIE_NAME and cookie_is_fresh(cookie):
+            session_data = snapshot_browser_state(
+                cookies,
+                url,
+                {
+                    "setCookieHeaderCaptured": True,
+                    "setCookieSourceUrl": url,
+                    **(metadata or {}),
+                },
+            )
             save_session(session_data)
             return True
 
+    cookie_header = header_value(headers, "cookie")
+    request_cookies = cookies_from_cookie_header(cookie_header, url)
+
+    if save_cookie_header_session(request_cookies, url, metadata):
+        return True
+
     return False
+
+
+def trigger_api_probe_requests(session: CDPSession) -> bool:
+    expression = f"""
+    (() => {{
+      try {{
+        const paths = {json.dumps(API_PROBE_PATHS)};
+        for (const path of paths) {{
+          setTimeout(() => {{
+            fetch(path, {{
+              credentials: 'include',
+              headers: {{ Accept: 'application/json' }},
+              cache: 'no-store'
+            }}).catch(() => {{}});
+          }}, 0);
+        }}
+        return true;
+      }} catch (error) {{
+        return false;
+      }}
+    }})()
+    """
+
+    try:
+        return bool(evaluate(session, expression))
+    except CDPError:
+        return False
+
+
+def capture_api_probe_requests(
+    session: CDPSession,
+    timeout_seconds: float = 6,
+) -> dict[str, Any]:
+    request_urls: dict[str, str] = {}
+    seen_urls: list[str] = []
+    captured = False
+
+    safe_call(session, "Network.enable")
+    probe_started = trigger_api_probe_requests(session)
+    deadline = time.time() + timeout_seconds
+
+    while time.time() < deadline:
+        message = session.recv_message(timeout=0.5)
+
+        if not message:
+            continue
+
+        method = message.get("method")
+
+        if method not in {
+            "Network.requestWillBeSent",
+            "Network.requestWillBeSentExtraInfo",
+            "Network.responseReceived",
+            "Network.responseReceivedExtraInfo",
+        }:
+            continue
+
+        headers, url = headers_from_network_event(message, request_urls)
+
+        if url and is_bnmp_url(url) and url not in seen_urls:
+            seen_urls.append(url)
+
+        if capture_session_from_network_headers(
+            headers,
+            url,
+            {"apiRequestProbeRan": True, "apiRequestUrls": seen_urls[:20]},
+        ):
+            captured = True
+
+    return {
+        "apiRequestProbeRan": probe_started,
+        "apiRequestUrls": seen_urls[:20],
+        "requestCookieHeaderCaptured": captured,
+    }
 
 
 def monitor_authorization_headers() -> None:
     while True:
         session = None
+        request_urls: dict[str, str] = {}
 
         try:
             wait_for_browser()
@@ -920,14 +1144,19 @@ def monitor_authorization_headers() -> None:
                 method = message.get("method")
 
                 if method not in {
+                    "Network.requestWillBeSent",
+                    "Network.requestWillBeSentExtraInfo",
                     "Network.responseReceived",
                     "Network.responseReceivedExtraInfo",
                 }:
                     continue
 
-                headers, url = headers_from_network_event(message)
+                headers, url = headers_from_network_event(message, request_urls)
                 if capture_session_from_network_headers(headers, url):
-                    print("Sessao BNMP capturada por header de rede.", flush=True)
+                    print(
+                        f"Sessao BNMP capturada por headers de rede: {url}",
+                        flush=True,
+                    )
         except Exception as error:
             print(f"Monitor BNMP reiniciando: {error}", flush=True)
             time.sleep(2)

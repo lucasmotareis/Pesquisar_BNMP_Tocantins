@@ -1124,7 +1124,7 @@ def export_remote_browser_session():
     if requests is None:
         return False, "O pacote requests nao esta instalado."
 
-    ok, error, _payload = post_remote_browser("export", timeout=30)
+    ok, error, _payload = post_remote_browser("export", timeout=75)
 
     if not ok:
         return False, error
@@ -1213,6 +1213,16 @@ def remote_export_error_detail(payload, fallback_text):
             "authorization capturado: "
             f"{'sim' if payload.get('authorizationTokenInStorage') else 'nao'}"
         )
+
+    if "requestCookieHeaderCaptured" in payload:
+        diagnostics.append(
+            "cookie em request: "
+            f"{'sim' if payload.get('requestCookieHeaderCaptured') else 'nao'}"
+        )
+
+    if payload.get("apiRequestProbeRan"):
+        api_urls = payload.get("apiRequestUrls") or []
+        diagnostics.append(f"sondagem api: {len(api_urls)} urls")
 
     if diagnostics:
         detail = f"{detail} ({'; '.join(diagnostics)})"
