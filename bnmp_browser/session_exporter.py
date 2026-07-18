@@ -33,6 +33,90 @@ COOKIE_WAIT_SECONDS = float(os.environ.get("BNMP_BROWSER_COOKIE_WAIT_SECONDS", "
 CAPTURED_SESSION_MAX_AGE_SECONDS = int(
     os.environ.get("BNMP_CAPTURED_SESSION_MAX_AGE_SECONDS", "600")
 )
+AUTH_CAPTURE_STORAGE_KEY = "bnmpCapturedAuthorization"
+AUTH_CAPTURED_AT_STORAGE_KEY = "bnmpCapturedAuthorizationAt"
+AUTH_CAPTURE_SCRIPT = f"""
+(() => {{
+  try {{
+    if (window.__bnmpAuthCaptureInstalled) {{
+      return true;
+    }}
+
+    const tokenKey = {json.dumps(AUTH_CAPTURE_STORAGE_KEY)};
+    const capturedAtKey = {json.dumps(AUTH_CAPTURED_AT_STORAGE_KEY)};
+
+    const saveToken = (value, source) => {{
+      const token = String(value || '').replace(/^Bearer\\s+/i, '').trim();
+      if (!token || token.split('.').length !== 3 || token.length < 80) {{
+        return;
+      }}
+
+      try {{
+        window.localStorage.setItem(tokenKey, token);
+        window.localStorage.setItem(capturedAtKey, String(Date.now()));
+        window.localStorage.setItem('bnmpCapturedAuthorizationSource', source || '');
+      }} catch (error) {{}}
+    }};
+
+    const readHeader = (headers) => {{
+      try {{
+        return headers && headers.get && (
+          headers.get('Authorization') || headers.get('authorization')
+        );
+      }} catch (error) {{
+        return '';
+      }}
+    }};
+
+    const originalFetch = window.fetch;
+    if (typeof originalFetch === 'function' && !originalFetch.__bnmpCaptureWrapped) {{
+      const wrappedFetch = function(...args) {{
+        return originalFetch.apply(this, args).then((response) => {{
+          saveToken(readHeader(response.headers), 'fetch');
+          return response;
+        }});
+      }};
+      wrappedFetch.__bnmpCaptureWrapped = true;
+      window.fetch = wrappedFetch;
+    }}
+
+    const proto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+    if (proto && !proto.__bnmpCaptureWrapped) {{
+      const originalOpen = proto.open;
+      const originalSend = proto.send;
+
+      proto.open = function(method, url, ...rest) {{
+        this.__bnmpCaptureUrl = url;
+        return originalOpen.call(this, method, url, ...rest);
+      }};
+
+      proto.send = function(...args) {{
+        this.addEventListener('readystatechange', function() {{
+          if (this.readyState !== 4) {{
+            return;
+          }}
+
+          try {{
+            saveToken(
+              this.getResponseHeader('Authorization') ||
+                this.getResponseHeader('authorization'),
+              'xhr'
+            );
+          }} catch (error) {{}}
+        }});
+        return originalSend.apply(this, args);
+      }};
+
+      proto.__bnmpCaptureWrapped = true;
+    }}
+
+    window.__bnmpAuthCaptureInstalled = true;
+    return true;
+  }} catch (error) {{
+    return false;
+  }}
+}})()
+"""
 
 
 class CDPError(RuntimeError):
@@ -322,8 +406,17 @@ def read_browser_cookies(
     cookies: list[dict[str, Any]] = []
     safe_call(session, "Network.enable")
 
-    for method in ("Network.getAllCookies", "Storage.getCookies"):
-        result = safe_call(session, method)
+    cookie_results = [
+        safe_call(session, "Network.getAllCookies"),
+        safe_call(session, "Storage.getCookies"),
+        safe_call(
+            session,
+            "Network.getCookies",
+            {"urls": [url for url in {current_url, BNMP_PORTAL_URL} if url]},
+        ),
+    ]
+
+    for result in cookie_results:
         cookies.extend(
             normalize_cookie(cookie)
             for cookie in result.get("cookies", [])
@@ -390,6 +483,21 @@ def local_storage_keys(session: CDPSession) -> list[str]:
     return [str(key) for key in keys]
 
 
+def install_auth_capture(session: CDPSession) -> bool:
+    safe_call(session, "Page.enable")
+    safe_call(session, "Network.enable")
+    safe_call(
+        session,
+        "Page.addScriptToEvaluateOnNewDocument",
+        {"source": AUTH_CAPTURE_SCRIPT},
+    )
+
+    try:
+        return bool(evaluate(session, AUTH_CAPTURE_SCRIPT))
+    except CDPError:
+        return False
+
+
 def has_cookie_named(cookies: list[dict[str, Any]], name: str) -> bool:
     return any(cookie.get("name") == name for cookie in cookies)
 
@@ -414,6 +522,103 @@ def read_fingerprint(session: CDPSession) -> str:
     ).strip()
 
 
+def captured_authorization_is_fresh(token: str, captured_at_ms: Any) -> bool:
+    expires = jwt_expiry(token)
+
+    if expires and expires <= time.time() + 5:
+        return False
+
+    try:
+        captured_at_seconds = float(captured_at_ms) / 1000
+    except (TypeError, ValueError):
+        return bool(expires)
+
+    return time.time() - captured_at_seconds <= CAPTURED_SESSION_MAX_AGE_SECONDS
+
+
+def read_captured_authorization(session: CDPSession) -> str:
+    data = evaluate(
+        session,
+        f"""
+        (() => {{
+          try {{
+            return {{
+              token: window.localStorage.getItem({json.dumps(AUTH_CAPTURE_STORAGE_KEY)}) || '',
+              capturedAt: window.localStorage.getItem({json.dumps(AUTH_CAPTURED_AT_STORAGE_KEY)}) || ''
+            }};
+          }} catch (error) {{
+            return {{token: '', capturedAt: ''}};
+          }}
+        }})()
+        """,
+    )
+
+    if not isinstance(data, dict):
+        return ""
+
+    token = normalize_authorization_token(str(data.get("token") or ""))
+
+    if not looks_like_bnmp_token(token):
+        return ""
+
+    if not captured_authorization_is_fresh(token, data.get("capturedAt")):
+        return ""
+
+    return token
+
+
+def write_cookie_to_page(session: CDPSession, token: str) -> bool:
+    max_age = max(60, CAPTURED_SESSION_MAX_AGE_SECONDS)
+    expression = f"""
+    (() => {{
+      try {{
+        document.cookie = {json.dumps(PORTAL_COOKIE_NAME)} + '=' +
+          {json.dumps(normalize_authorization_token(token))} +
+          '; path=/; max-age={max_age}; SameSite=Lax';
+        return document.cookie.indexOf({json.dumps(PORTAL_COOKIE_NAME + "=")}) >= 0;
+      }} catch (error) {{
+        return false;
+      }}
+    }})()
+    """
+
+    try:
+        return bool(evaluate(session, expression))
+    except CDPError:
+        return False
+
+
+def prepare_browser_for_capture() -> dict[str, Any]:
+    wait_for_browser()
+    targets = fetch_json(f"{CDP_BASE_URL}/json/list")
+    target = pick_page_target(targets)
+    session = CDPSession(target["webSocketDebuggerUrl"])
+
+    try:
+        current_url = current_page_url(session, str(target.get("url", "")))
+        installed = install_auth_capture(session)
+        token = read_captured_authorization(session)
+
+        if token:
+            write_cookie_to_page(session, token)
+
+        cookies = read_browser_cookies(session, current_url)
+        fingerprint = read_fingerprint(session)
+        page_title = evaluate(session, "document.title") or target.get("title", "")
+    finally:
+        session.close()
+
+    return {
+        "ok": True,
+        "authCaptureInstalled": installed,
+        "authorizationTokenInStorage": bool(token),
+        "portalCookiePresent": has_cookie_named(cookies, PORTAL_COOKIE_NAME),
+        "fingerprintPresent": bool(fingerprint),
+        "currentUrl": current_url,
+        "pageTitle": page_title,
+    }
+
+
 def snapshot_browser_state(extra_cookies=None, source_url: str = "") -> dict[str, Any]:
     wait_for_browser()
     targets = fetch_json(f"{CDP_BASE_URL}/json/list")
@@ -422,9 +627,15 @@ def snapshot_browser_state(extra_cookies=None, source_url: str = "") -> dict[str
 
     try:
         current_url = current_page_url(session, str(target.get("url", "")))
+        auth_capture_installed = install_auth_capture(session)
         cookies = read_browser_cookies(session, current_url)
         if extra_cookies:
             cookies.extend(extra_cookies)
+
+        captured_token = read_captured_authorization(session)
+        if captured_token:
+            write_cookie_to_page(session, captured_token)
+            cookies.append(cookie_from_token(captured_token, current_url))
 
         fingerprint = read_fingerprint(session)
         user_agent = evaluate(session, "navigator.userAgent") or ""
@@ -444,6 +655,8 @@ def snapshot_browser_state(extra_cookies=None, source_url: str = "") -> dict[str
         "localStorageKeys": storage_keys,
         "sourceUrl": source_url,
         "authorizationHeaderCaptured": bool(extra_cookies),
+        "authCaptureInstalled": auth_capture_installed,
+        "authorizationTokenInStorage": bool(captured_token),
         "targetUrls": [
             str(item.get("url", ""))
             for item in targets
@@ -470,8 +683,15 @@ def extract_browser_session() -> dict[str, Any]:
             time.sleep(2)
 
         current_url = current_page_url(session, current_url)
+        auth_capture_installed = install_auth_capture(session)
         fingerprint = read_fingerprint(session)
+        captured_token = read_captured_authorization(session)
+        if captured_token:
+            write_cookie_to_page(session, captured_token)
+
         cookies, current_url = wait_for_browser_cookies(session, current_url)
+        if captured_token and not has_cookie_named(cookies, PORTAL_COOKIE_NAME):
+            cookies.append(cookie_from_token(captured_token, current_url))
 
         if (
             not has_cookie_named(cookies, PORTAL_COOKIE_NAME)
@@ -484,6 +704,10 @@ def extract_browser_session() -> dict[str, Any]:
             time.sleep(3)
             cookies, current_url = wait_for_browser_cookies(session, BNMP_PORTAL_URL)
             fingerprint = read_fingerprint(session) or fingerprint
+            captured_token = read_captured_authorization(session) or captured_token
+
+            if captured_token and not has_cookie_named(cookies, PORTAL_COOKIE_NAME):
+                cookies.append(cookie_from_token(captured_token, current_url))
 
         user_agent = evaluate(session, "navigator.userAgent") or ""
         page_title = evaluate(session, "document.title") or target.get("title", "")
@@ -501,6 +725,8 @@ def extract_browser_session() -> dict[str, Any]:
         "pageTitle": page_title,
         "localStorageKeys": storage_keys,
         "postCaptchaNavigationTried": post_captcha_navigation_tried,
+        "authCaptureInstalled": auth_capture_installed,
+        "authorizationTokenInStorage": bool(captured_token),
         "targetUrls": [
             str(item.get("url", ""))
             for item in targets
@@ -605,6 +831,10 @@ def public_summary(session_data: dict[str, Any]) -> dict[str, Any]:
         "authorizationHeaderCaptured": bool(
             session_data.get("authorizationHeaderCaptured")
         ),
+        "authCaptureInstalled": bool(session_data.get("authCaptureInstalled")),
+        "authorizationTokenInStorage": bool(
+            session_data.get("authorizationTokenInStorage")
+        ),
         "exportedAt": session_data.get("exportedAt", ""),
     }
 
@@ -678,6 +908,7 @@ def monitor_authorization_headers() -> None:
             targets = fetch_json(f"{CDP_BASE_URL}/json/list")
             target = pick_page_target(targets)
             session = CDPSession(target["webSocketDebuggerUrl"])
+            install_auth_capture(session)
             session.call("Network.enable")
 
             while True:
@@ -695,7 +926,8 @@ def monitor_authorization_headers() -> None:
                     continue
 
                 headers, url = headers_from_network_event(message)
-                capture_session_from_network_headers(headers, url)
+                if capture_session_from_network_headers(headers, url):
+                    print("Sessao BNMP capturada por header de rede.", flush=True)
         except Exception as error:
             print(f"Monitor BNMP reiniciando: {error}", flush=True)
             time.sleep(2)
@@ -784,11 +1016,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(404, {"ok": False, "error": "Rota nao encontrada."})
 
     def do_POST(self):
-        if self.path != "/export":
+        if self.path not in {"/export", "/prepare"}:
             self.send_json(404, {"ok": False, "error": "Rota nao encontrada."})
             return
 
         if not self.require_export_token():
+            return
+
+        if self.path == "/prepare":
+            try:
+                self.send_json(200, prepare_browser_for_capture())
+            except Exception as error:
+                self.send_json(500, {"ok": False, "error": str(error)})
             return
 
         try:

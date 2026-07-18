@@ -172,6 +172,20 @@
         $('remoteFrame').style.display='none';
         $('remotePlaceholder').style.display='grid';
       }
+      if(data.browserExportConfigured){
+        prepareRemoteCapture().catch(()=>setNotice('Nao foi possivel preparar a captura do navegador remoto.'));
+      }
+    }
+    async function prepareRemoteCapture(){
+      const res=await fetch('/api/auth/prepare-remote-session',{method:'POST'});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok){
+        setNotice(data.error||'Nao foi possivel preparar a captura do navegador remoto.');
+        return;
+      }
+      if(data.authCaptureInstalled){
+        $('configText').textContent+=' Captura preparada antes do captcha.';
+      }
     }
     async function refreshStatus(){
       const res=await fetch('/api/auth/status');

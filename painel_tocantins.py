@@ -1124,14 +1124,36 @@ def export_remote_browser_session():
     if requests is None:
         return False, "O pacote requests nao esta instalado."
 
+    ok, error, _payload = post_remote_browser("export", timeout=30)
+
+    if not ok:
+        return False, error
+
+    return load_session_from_cookies_file()
+
+
+def remote_browser_endpoint(action):
+    if not BNMP_BROWSER_EXPORT_URL:
+        return ""
+
+    base_url = BNMP_BROWSER_EXPORT_URL.rsplit("/", 1)[0]
+    return f"{base_url}/{action.lstrip('/')}"
+
+
+def post_remote_browser(action, timeout=30):
+    url = BNMP_BROWSER_EXPORT_URL if action == "export" else remote_browser_endpoint(action)
+
+    if not url:
+        return False, "BNMP_BROWSER_EXPORT_URL nao configurado.", {}
+
     headers = {}
     if BNMP_BROWSER_EXPORT_TOKEN:
         headers["X-BNMP-Export-Token"] = BNMP_BROWSER_EXPORT_TOKEN
 
     try:
-        response = requests.post(BNMP_BROWSER_EXPORT_URL, headers=headers, timeout=30)
+        response = requests.post(url, headers=headers, timeout=timeout)
     except requests.RequestException as error:
-        return False, f"Falha ao acionar o navegador remoto BNMP: {error}"
+        return False, f"Falha ao acionar o navegador remoto BNMP: {error}", {}
 
     if response.status_code >= 400:
         try:
@@ -1140,9 +1162,24 @@ def export_remote_browser_session():
         except (ValueError, AttributeError):
             detail = response.text[:300]
 
-        return False, f"Navegador remoto recusou a exportacao: {detail}"
+        return False, f"Navegador remoto recusou a exportacao: {detail}", {}
 
-    return load_session_from_cookies_file()
+    try:
+        payload = response.json()
+    except (ValueError, AttributeError):
+        payload = {}
+
+    return True, "", payload
+
+
+def prepare_remote_browser_session():
+    if not BNMP_BROWSER_EXPORT_URL:
+        return False, "BNMP_BROWSER_EXPORT_URL nao configurado.", {}
+
+    if requests is None:
+        return False, "O pacote requests nao esta instalado.", {}
+
+    return post_remote_browser("prepare", timeout=20)
 
 
 def remote_export_error_detail(payload, fallback_text):
@@ -1165,6 +1202,17 @@ def remote_export_error_detail(payload, fallback_text):
 
     if payload.get("postCaptchaNavigationTried"):
         diagnostics.append("tentou voltar para a pesquisa apos o captcha")
+
+    if "authCaptureInstalled" in payload:
+        diagnostics.append(
+            f"captura instalada: {'sim' if payload.get('authCaptureInstalled') else 'nao'}"
+        )
+
+    if "authorizationTokenInStorage" in payload:
+        diagnostics.append(
+            "authorization capturado: "
+            f"{'sim' if payload.get('authorizationTokenInStorage') else 'nao'}"
+        )
 
     if diagnostics:
         detail = f"{detail} ({'; '.join(diagnostics)})"
@@ -1479,6 +1527,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             self.send_json(200, auth_status_payload())
+            return
+
+        if path == "/api/auth/prepare-remote-session":
+            ok, error, payload = prepare_remote_browser_session()
+
+            if not ok:
+                self.send_json(400, {"error": error})
+                return
+
+            self.send_json(200, payload or {"ok": True})
             return
 
         if path == "/api/auth/export-remote-session":
