@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import websocket
 
@@ -24,6 +25,8 @@ CDP_PORT = int(os.environ.get("CDP_PORT", "9222"))
 CDP_BASE_URL = f"http://127.0.0.1:{CDP_PORT}"
 EXPORT_TOKEN = os.environ.get("BNMP_BROWSER_EXPORT_TOKEN", "")
 EXPORT_TOKEN_HEADER = "X-BNMP-Export-Token"
+PORTAL_COOKIE_NAME = "portalbnmp"
+COOKIE_WAIT_SECONDS = float(os.environ.get("BNMP_BROWSER_COOKIE_WAIT_SECONDS", "12"))
 
 
 class CDPError(RuntimeError):
@@ -126,6 +129,17 @@ def evaluate(session: CDPSession, expression: str) -> Any:
     return remote_object.get("value")
 
 
+def safe_call(
+    session: CDPSession,
+    method: str,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        return session.call(method, params)
+    except CDPError:
+        return {}
+
+
 def normalize_cookie(cookie: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "name",
@@ -140,26 +154,139 @@ def normalize_cookie(cookie: dict[str, Any]) -> dict[str, Any]:
     return {key: cookie[key] for key in allowed if key in cookie}
 
 
-def extract_browser_session() -> dict[str, Any]:
-    wait_for_browser()
+def dedupe_cookies(cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    seen = set()
 
-    targets = fetch_json(f"{CDP_BASE_URL}/json/list")
-    target = pick_page_target(targets)
-    session = CDPSession(target["webSocketDebuggerUrl"])
+    for cookie in cookies:
+        name = str(cookie.get("name") or "")
+        value = str(cookie.get("value") or "")
+        domain = str(cookie.get("domain") or "")
+        path = str(cookie.get("path") or "/")
 
-    try:
-        current_url = str(target.get("url", ""))
-        if not current_url.startswith("http"):
-            session.call("Page.navigate", {"url": BNMP_PORTAL_URL})
-            time.sleep(2)
+        if not name:
+            continue
 
-        cookies_result = session.call("Network.getAllCookies")
-        cookies = [
+        key = (name, domain, path, value)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        result.append(cookie)
+
+    return result
+
+
+def cookies_from_document_cookie(raw_cookie: str, current_url: str) -> list[dict[str, Any]]:
+    host = urlparse(current_url).hostname or ""
+    cookies = []
+
+    for part in raw_cookie.split(";"):
+        name, separator, value = part.strip().partition("=")
+
+        if not separator or not name:
+            continue
+
+        cookies.append(
+            {
+                "name": name.strip(),
+                "value": value.strip(),
+                "domain": host,
+                "path": "/",
+                "httpOnly": False,
+                "secure": current_url.startswith("https://"),
+            }
+        )
+
+    return cookies
+
+
+def current_page_url(session: CDPSession, fallback: str = "") -> str:
+    return str(evaluate(session, "location.href") or fallback or "")
+
+
+def read_browser_cookies(
+    session: CDPSession,
+    current_url: str,
+) -> list[dict[str, Any]]:
+    cookies: list[dict[str, Any]] = []
+    safe_call(session, "Network.enable")
+
+    for method in ("Network.getAllCookies", "Storage.getCookies"):
+        result = safe_call(session, method)
+        cookies.extend(
             normalize_cookie(cookie)
-            for cookie in cookies_result.get("cookies", [])
+            for cookie in result.get("cookies", [])
             if isinstance(cookie, dict)
-        ]
-        fingerprint = evaluate(
+        )
+
+    document_cookie = evaluate(
+        session,
+        """
+        (() => {
+          try {
+            return document.cookie || '';
+          } catch (error) {
+            return '';
+          }
+        })()
+        """,
+    )
+
+    if document_cookie:
+        cookies.extend(cookies_from_document_cookie(str(document_cookie), current_url))
+
+    return dedupe_cookies(cookies)
+
+
+def wait_for_browser_cookies(
+    session: CDPSession,
+    initial_url: str,
+) -> tuple[list[dict[str, Any]], str]:
+    deadline = time.time() + COOKIE_WAIT_SECONDS
+    current_url = initial_url
+    cookies: list[dict[str, Any]] = []
+
+    while True:
+        current_url = current_page_url(session, current_url)
+        cookies = read_browser_cookies(session, current_url)
+
+        if has_cookie_named(cookies, PORTAL_COOKIE_NAME):
+            return cookies, current_url
+
+        if time.time() >= deadline:
+            return cookies, current_url
+
+        time.sleep(0.5)
+
+
+def local_storage_keys(session: CDPSession) -> list[str]:
+    keys = evaluate(
+        session,
+        """
+        (() => {
+          try {
+            return Object.keys(window.localStorage || {}).slice(0, 50);
+          } catch (error) {
+            return [];
+          }
+        })()
+        """,
+    )
+
+    if not isinstance(keys, list):
+        return []
+
+    return [str(key) for key in keys]
+
+
+def has_cookie_named(cookies: list[dict[str, Any]], name: str) -> bool:
+    return any(cookie.get("name") == name for cookie in cookies)
+
+
+def read_fingerprint(session: CDPSession) -> str:
+    return str(
+        evaluate(
             session,
             """
             (() => {
@@ -172,8 +299,46 @@ def extract_browser_session() -> dict[str, Any]:
               return '';
             })()
             """,
-        ) or ""
+        )
+        or ""
+    ).strip()
+
+
+def extract_browser_session() -> dict[str, Any]:
+    wait_for_browser()
+
+    targets = fetch_json(f"{CDP_BASE_URL}/json/list")
+    target = pick_page_target(targets)
+    session = CDPSession(target["webSocketDebuggerUrl"])
+
+    try:
+        target_url = str(target.get("url", ""))
+        current_url = target_url
+        post_captcha_navigation_tried = False
+
+        if not current_url.startswith("http"):
+            session.call("Page.navigate", {"url": BNMP_PORTAL_URL})
+            time.sleep(2)
+
+        current_url = current_page_url(session, current_url)
+        fingerprint = read_fingerprint(session)
+        cookies, current_url = wait_for_browser_cookies(session, current_url)
+
+        if (
+            not has_cookie_named(cookies, PORTAL_COOKIE_NAME)
+            and fingerprint
+            and "portalbnmp" in current_url
+            and "#/captcha" in current_url
+        ):
+            post_captcha_navigation_tried = True
+            session.call("Page.navigate", {"url": BNMP_PORTAL_URL})
+            time.sleep(3)
+            cookies, current_url = wait_for_browser_cookies(session, BNMP_PORTAL_URL)
+            fingerprint = read_fingerprint(session) or fingerprint
+
         user_agent = evaluate(session, "navigator.userAgent") or ""
+        page_title = evaluate(session, "document.title") or target.get("title", "")
+        storage_keys = local_storage_keys(session)
     finally:
         session.close()
 
@@ -182,6 +347,16 @@ def extract_browser_session() -> dict[str, Any]:
         "fingerprint": fingerprint,
         "userAgent": user_agent,
         "portalUrl": BNMP_PORTAL_URL,
+        "currentUrl": current_url,
+        "targetUrl": target_url,
+        "pageTitle": page_title,
+        "localStorageKeys": storage_keys,
+        "postCaptchaNavigationTried": post_captcha_navigation_tried,
+        "targetUrls": [
+            str(item.get("url", ""))
+            for item in targets
+            if isinstance(item, dict) and item.get("type") == "page"
+        ][:10],
         "exportedAt": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -205,13 +380,27 @@ def public_summary(session_data: dict[str, Any]) -> dict[str, Any]:
             if isinstance(cookie, dict) and cookie.get("name")
         }
     )
+    cookie_domains = sorted(
+        {
+            cookie.get("domain")
+            for cookie in cookies
+            if isinstance(cookie, dict) and cookie.get("domain")
+        }
+    )
 
     return {
         "ok": True,
         "savedTo": str(BNMP_COOKIES_FILE),
         "cookieNames": cookie_names,
-        "portalCookiePresent": "portalbnmp" in cookie_names,
+        "cookieDomains": cookie_domains,
+        "portalCookiePresent": PORTAL_COOKIE_NAME in cookie_names,
         "fingerprintPresent": bool(session_data.get("fingerprint")),
+        "currentUrl": session_data.get("currentUrl", ""),
+        "targetUrl": session_data.get("targetUrl", ""),
+        "pageTitle": session_data.get("pageTitle", ""),
+        "postCaptchaNavigationTried": bool(
+            session_data.get("postCaptchaNavigationTried")
+        ),
         "exportedAt": session_data.get("exportedAt", ""),
     }
 
@@ -220,9 +409,22 @@ def has_portal_cookie(session_data: dict[str, Any]) -> bool:
     cookies = session_data.get("cookies") or []
 
     return any(
-        isinstance(cookie, dict) and cookie.get("name") == "portalbnmp"
+        isinstance(cookie, dict) and cookie.get("name") == PORTAL_COOKIE_NAME
         for cookie in cookies
     )
+
+
+def missing_portal_cookie_payload(session_data: dict[str, Any]) -> dict[str, Any]:
+    summary = public_summary(session_data)
+    summary["ok"] = False
+    summary["error"] = (
+        "Cookie portalbnmp nao encontrado. "
+        "Confirme que a aba remota esta no portal BNMP apos o captcha "
+        "e aguarde o carregamento completo antes de importar."
+    )
+    summary["localStorageKeys"] = session_data.get("localStorageKeys", [])
+    summary["targetUrls"] = session_data.get("targetUrls", [])
+    return summary
 
 
 def export_token_configured() -> bool:
@@ -315,19 +517,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             session_data = extract_browser_session()
             if not has_portal_cookie(session_data):
-                self.send_json(
-                    409,
-                    {
-                        "ok": False,
-                        "error": (
-                            "Cookie portalbnmp nao encontrado. "
-                            "Resolva o captcha no navegador remoto e aguarde "
-                            "o portal carregar antes de importar."
-                        ),
-                        "fingerprintPresent": bool(session_data.get("fingerprint")),
-                        "portalUrl": session_data.get("portalUrl", ""),
-                    },
-                )
+                self.send_json(409, missing_portal_cookie_payload(session_data))
                 return
 
             save_session(session_data)

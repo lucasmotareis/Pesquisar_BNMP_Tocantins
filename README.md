@@ -148,6 +148,7 @@ BNMP_BROWSER_EXPORT_URL=http://bnmp-browser:7788/export
 BNMP_BROWSER_EXPORT_TOKEN=gere-um-token-interno-longo
 BNMP_REMOTE_BROWSER_URL=https://seu-dominio/vnc.html?autoconnect=1&resize=remote
 BNMP_VNC_PASSWORD=gere-uma-senha-forte-para-o-novnc
+BNMP_BROWSER_COOKIE_WAIT_SECONDS=12
 BNMP_COOKIES_FILE=/app/data/bnmp_cookies.json
 BNMP_COOKIE_TTL_SECONDS=240
 ```
@@ -176,6 +177,8 @@ https://bnmp.pmto8bpm.com.br/vnc.html?autoconnect=1&resize=remote
 ```
 
 Isso so funciona se o proxy da VPS/Coolify encaminhar essa rota para a porta `6080` do servico `bnmp-browser`. Caso contrario, use um subdominio protegido, por exemplo `https://bnmp-browser.pmto8bpm.com.br/vnc.html?autoconnect=1&resize=remote`, e configure esse valor em `BNMP_REMOTE_BROWSER_URL`.
+
+Se a importacao retornar `Cookie portalbnmp nao encontrado`, confira os campos `currentUrl`, `cookieNames` e `cookieDomains` exibidos no erro. O `currentUrl` precisa estar em `portalbnmp.pdpj.jus.br` ou `portalbnmp.cnj.jus.br`, e `cookieNames` precisa conter `portalbnmp`. Se a URL ainda estiver em uma tela intermediaria, volte ao noVNC, aguarde o portal terminar de carregar e importe novamente.
 
 O arquivo apontado por `BNMP_COOKIES_FILE` deve seguir um dos formatos aceitos:
 

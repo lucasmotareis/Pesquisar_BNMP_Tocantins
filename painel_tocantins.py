@@ -1136,13 +1136,40 @@ def export_remote_browser_session():
     if response.status_code >= 400:
         try:
             payload = response.json()
-            detail = payload.get("error") or response.text[:300]
+            detail = remote_export_error_detail(payload, response.text)
         except (ValueError, AttributeError):
             detail = response.text[:300]
 
         return False, f"Navegador remoto recusou a exportacao: {detail}"
 
     return load_session_from_cookies_file()
+
+
+def remote_export_error_detail(payload, fallback_text):
+    if not isinstance(payload, dict):
+        return fallback_text[:300]
+
+    detail = payload.get("error") or fallback_text[:300]
+    diagnostics = []
+
+    if payload.get("currentUrl"):
+        diagnostics.append(f"URL atual: {payload['currentUrl']}")
+
+    if "cookieNames" in payload:
+        cookie_names = ", ".join(payload.get("cookieNames") or []) or "nenhum"
+        diagnostics.append(f"cookies: {cookie_names}")
+
+    if "cookieDomains" in payload:
+        cookie_domains = ", ".join(payload.get("cookieDomains") or []) or "nenhum"
+        diagnostics.append(f"dominios: {cookie_domains}")
+
+    if payload.get("postCaptchaNavigationTried"):
+        diagnostics.append("tentou voltar para a pesquisa apos o captcha")
+
+    if diagnostics:
+        detail = f"{detail} ({'; '.join(diagnostics)})"
+
+    return detail
 
 
 def cookie_remaining_seconds():

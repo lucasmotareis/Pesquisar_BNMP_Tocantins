@@ -35,6 +35,7 @@ services:
       BNMP_COOKIES_FILE: /app/data/bnmp_cookies.json
       BNMP_BROWSER_EXPORT_TOKEN: "${BNMP_BROWSER_EXPORT_TOKEN:-dev-export-token-change-me}"
       BNMP_VNC_PASSWORD: "${BNMP_VNC_PASSWORD:-dev-vnc-password-change-me}"
+      BNMP_BROWSER_COOKIE_WAIT_SECONDS: "${BNMP_BROWSER_COOKIE_WAIT_SECONDS:-12}"
       SCREEN_WIDTH: "${BNMP_BROWSER_WIDTH:-1366}"
       SCREEN_HEIGHT: "${BNMP_BROWSER_HEIGHT:-768}"
       NOVNC_PORT: "6080"
