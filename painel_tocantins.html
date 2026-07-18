@@ -114,6 +114,7 @@
     .box h2{margin:0 0 6px;font-size:18px}
     .box p{margin:0 0 12px;color:var(--muted);font-size:13px}
     .box .row{display:grid;grid-template-columns:1fr auto auto;gap:8px}
+    .box .row.auth-row{grid-template-columns:1fr auto auto auto}
     .primary{height:38px;border:0;border-radius:8px;background:var(--blue);color:#fff;padding:0 14px;font-weight:850}
     .secondary{height:38px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--text);padding:0 12px;font-weight:800}
     .cookie-help{border:1px solid var(--line);border-radius:8px;background:var(--surface-2);padding:10px 12px;margin:10px 0 12px;font-size:12px;color:var(--muted)}
@@ -126,7 +127,7 @@
     .adminbar .grow{flex:1}
     .footer{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding:15px 0 24px;text-align:center}
     @media(max-width:1060px){.filter-grid{grid-template-columns:1fr 1fr 1fr}.kpis{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:720px){.filter-grid,.summary{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.bar{grid-template-columns:110px 1fr 28px}.actions{grid-template-columns:1fr}.edit-grid{grid-template-columns:1fr}.pager{justify-content:flex-start}.box .row{grid-template-columns:1fr}}
+    @media(max-width:720px){.filter-grid,.summary{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}.bar{grid-template-columns:110px 1fr 28px}.actions{grid-template-columns:1fr}.edit-grid{grid-template-columns:1fr}.pager{justify-content:flex-start}.box .row,.box .row.auth-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -256,25 +257,26 @@
     <div class="empty" id="empty">Nenhum mandado encontrado com os filtros atuais.</div>
   </main>
 
-  <div class="footer">Dados locais do BNMP/CNJ. O cookie informado fica apenas na memória do servidor local.</div>
+  <div class="footer">Dados locais do BNMP/CNJ. A sessao BNMP fica apenas na memoria do servidor.</div>
 
   <div class="modal" id="cookieModal">
     <div class="box">
-      <h2>Autenticação BNMP</h2>
-      <p>Informe o cookie apenas para baixar o PDF do mandado. Ele fica em memória por 4 minutos.</p>
+      <h2>Autenticacao BNMP</h2>
+      <p>Abra a tela de autenticacao para resolver o captcha no navegador remoto, ou informe o cookie manualmente como fallback.</p>
       <details class="cookie-help" open>
-        <summary>Como pegar o cookie portalbnmp</summary>
+        <summary>Fallback manual</summary>
         <ol>
           <li>Acesse <a href="https://portalbnmp.cnj.jus.br/" target="_blank" rel="noopener">portalbnmp.cnj.jus.br</a> e valide o Captcha.</li>
           <li>Abra as ferramentas de desenvolvedor com <b>F12</b>.</li>
-          <li>Entre em <b>Application</b> ou <b>Aplicação</b>.</li>
+          <li>Entre em <b>Application</b> ou <b>Aplicacao</b>.</li>
           <li>Abra <b>Cookies</b> e selecione <b>https://portalbnmp.cnj.jus.br/</b>.</li>
           <li>Procure o nome <b>portalbnmp</b>, copie o valor e cole abaixo.</li>
         </ol>
       </details>
-      <div class="row">
+      <div class="row auth-row">
         <input id="cookieInput" type="password" placeholder="Cole o valor do portalbnmp ou portalbnmp=...">
-        <button class="primary" id="saveCookieBtn">Baixar</button>
+        <button class="primary" id="openAuthPageBtn">Autenticar</button>
+        <button class="primary" id="saveCookieBtn">Usar cookie</button>
         <button class="secondary" id="closeCookieBtn">Agora não</button>
       </div>
     </div>
@@ -320,7 +322,7 @@
       area('crp3-8cipm','CRP-3','8ª CIPM','Palmeirópolis',['Jaú do Tocantins','Palmeirópolis','Paraná','São Salvador do Tocantins','São Valério'],['São Valério da Natividade'])
     ];
     const $=id=>document.getElementById(id);
-    const state={records:[],meta:{},pagination:{page:1,size:50,total:0,totalPages:1,start:0,end:0},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,pendingDownload:null,admin:sessionStorage.getItem('pmto_admin')==='1',adminPassword:sessionStorage.getItem('pmto_admin_pass')||'',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
+    const state={records:[],meta:{},pagination:{page:1,size:50,total:0,totalPages:1,start:0,end:0},filters:{q:'',crp:'',unit:'',origin:'ambos',type:'',validade:'',status:'',sort:'territorio',tab:'todos'},auth:false,expiresAt:0,authSource:'',fingerprintPresent:false,pendingDownload:null,admin:sessionStorage.getItem('pmto_admin')==='1',adminPassword:sessionStorage.getItem('pmto_admin_pass')||'',theme:localStorage.getItem('pmto_theme')||'light',edits:JSON.parse(localStorage.getItem('pmto_edits')||'{}')};
     const unitById=Object.fromEntries(TERRITORIO.map(u=>[u.id,u]));
 
     function norm(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
@@ -509,14 +511,22 @@
       const remaining=Math.max(0,Math.floor((state.expiresAt-Date.now())/1000));
       if(!state.auth||remaining<=0){
         const wasAuth=state.auth;
-        state.auth=false;$('cookieStatus').textContent='Cookie pendente';$('cookieStatus').className='cookie-chip bad';
+        state.auth=false;state.authSource='';state.fingerprintPresent=false;$('cookieStatus').textContent='Sessao BNMP pendente';$('cookieStatus').className='cookie-chip bad';
         if(wasAuth)render();
         return;
       }
       const min=String(Math.floor(remaining/60)).padStart(2,'0');
       const sec=String(remaining%60).padStart(2,'0');
-      $('cookieStatus').textContent=`Cookie ${min}:${sec}`;
+      $('cookieStatus').textContent=`BNMP ${min}:${sec}`;
       $('cookieStatus').className='cookie-chip '+(remaining<=30?'warn':'ok');
+    }
+    function openBnmpAuthPage(download=null){
+      state.pendingDownload=download;
+      if(download)sessionStorage.setItem('pending_bnmp_download',JSON.stringify(download));
+      const params=new URLSearchParams();
+      params.set('returnTo',location.pathname+location.search+location.hash);
+      if(download){params.set('downloadId',download.id);params.set('downloadType',download.type);}
+      location.href=`/bnmp/autenticar?${params.toString()}`;
     }
     function openCookieModal(download=null){
       state.pendingDownload=download;
@@ -529,7 +539,7 @@
     }
     async function loadStatus(){
       const res=await fetch('/api/auth/status');const data=await res.json();
-      state.auth=Boolean(data.authenticated);state.expiresAt=Date.now()+(data.remainingSeconds||0)*1000;
+      state.auth=Boolean(data.authenticated);state.expiresAt=Date.now()+(data.remainingSeconds||0)*1000;state.authSource=data.source||'';state.fingerprintPresent=Boolean(data.fingerprintPresent);
       updateCookieUI();
     }
     async function saveCookie(){
@@ -539,8 +549,18 @@
       const data=await res.json();
       if(!res.ok){alert(data.error||'Cookie inválido.');return;}
       const pending=state.pendingDownload;
-      state.auth=true;state.expiresAt=Date.now()+(data.remainingSeconds||240)*1000;state.pendingDownload=null;$('cookieInput').value='';$('cookieModal').classList.remove('on');updateCookieUI();render();
+      state.auth=true;state.expiresAt=Date.now()+(data.remainingSeconds||240)*1000;state.authSource=data.source||'manual-cookie';state.fingerprintPresent=Boolean(data.fingerprintPresent);state.pendingDownload=null;$('cookieInput').value='';$('cookieModal').classList.remove('on');updateCookieUI();render();
       if(pending)downloadPdf(pending.id,pending.type);
+    }
+    function resumePendingDownload(){
+      if(!state.auth)return;
+      const raw=sessionStorage.getItem('pending_bnmp_download');
+      if(!raw)return;
+      sessionStorage.removeItem('pending_bnmp_download');
+      try{
+        const pending=JSON.parse(raw);
+        if(pending&&pending.id&&pending.type)setTimeout(()=>downloadPdf(pending.id,pending.type),250);
+      }catch(error){}
     }
     function mandadosParams(){
       const params=new URLSearchParams();
@@ -563,12 +583,12 @@
       render();
     }
     async function downloadPdf(id,type){
-      if(!state.auth){openCookieModal({id,type});return;}
+      if(!state.auth){openBnmpAuthPage({id,type});return;}
       const btn=document.querySelector(`[data-download="${CSS.escape(String(id))}"]`);
       if(btn)btn.textContent='Baixando...';
       try{
         const res=await fetch(`/api/pdf/${encodeURIComponent(id)}/${encodeURIComponent(type)}`);
-        if(res.status===401){state.auth=false;updateCookieUI();const data=await res.json().catch(()=>({}));alert(data.error||'Cookie expirado. Cole um novo cookie para tentar novamente.');openCookieModal({id,type});return;}
+        if(res.status===401){state.auth=false;updateCookieUI();const data=await res.json().catch(()=>({}));alert(data.error||'Sessao BNMP expirada. Autentique novamente.');openBnmpAuthPage({id,type});return;}
         if(!res.ok){const data=await res.json().catch(()=>({error:'Falha ao baixar PDF.'}));alert(data.error||'Falha ao baixar PDF.');return;}
         const blob=await res.blob();
         const record=state.records.find(r=>String(r.id)===String(id))||{};
@@ -586,6 +606,7 @@
     $('q').addEventListener('input',e=>{state.filters.q=e.target.value;scheduleReload();});
     setFilter('fcrp','crp');setFilter('funidade','unit');setFilter('forigem','origin');setFilter('ftipo','type');setFilter('fvalidade','validade');setFilter('fstatus','status');setFilter('fsort','sort');
     $('themeBtn').addEventListener('click',()=>{state.theme=state.theme==='dark'?'light':'dark';localStorage.setItem('pmto_theme',state.theme);render();});
+    $('openAuthPageBtn').addEventListener('click',()=>openBnmpAuthPage(state.pendingDownload));
     $('saveCookieBtn').addEventListener('click',saveCookie);
     $('closeCookieBtn').addEventListener('click',closeCookieModal);
     $('cookieInput').addEventListener('keydown',e=>{if(e.key==='Enter')saveCookie();});
@@ -613,7 +634,7 @@
     $('dataFile').addEventListener('change',event=>{const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=async()=>{try{JSON.parse(reader.result);const ok=confirm(`Enviar ${file.name} como base de mandados do painel?`);if(!ok)return;const res=await fetch('/api/data/upload',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':state.adminPassword},body:reader.result});const data=await res.json().catch(()=>({}));if(!res.ok){alert(data.error||'Falha ao enviar a base.');return;}alert(`Base importada: ${data.total||0} registros.`);loadData({resetPage:true});}catch(error){alert('Arquivo JSON inválido.');}finally{event.target.value='';}};reader.readAsText(file);});
     $('importBtn').addEventListener('click',()=>$('importFile').click());
     $('importFile').addEventListener('change',event=>{const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result);state.edits=parsed.edits||parsed;saveEdits();render();alert('Backup importado.');}catch(error){alert('Arquivo inválido.');}};reader.readAsText(file);event.target.value='';});
-    Promise.all([loadData(),loadStatus()]).then(()=>setInterval(updateCookieUI,1000));
+    Promise.all([loadData(),loadStatus()]).then(()=>{resumePendingDownload();setInterval(updateCookieUI,1000);});
   </script>
 </body>
 </html>

@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     BNMP_DATA_DIR=/app/data \
     BNMP_DATA_FILE=/app/data/mandados_processados.json \
+    BNMP_COOKIES_FILE=/app/data/bnmp_cookies.json \
     ADMIN_PASSWORD=admin123
 
 WORKDIR /app
@@ -11,7 +12,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY painel_tocantins.py painel_tocantins.html ./
+COPY painel_tocantins.py painel_tocantins.html bnmp_auth.html ./
 RUN mkdir -p /app/data
 
 EXPOSE 8765

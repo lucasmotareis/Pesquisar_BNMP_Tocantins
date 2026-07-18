@@ -1,4 +1,6 @@
 import argparse
+import base64
+import hmac
 import json
 import os
 import re
@@ -49,13 +51,33 @@ DATA_FILES = unique_paths(
         ROOT / "pecas_autorizadas.json",
     ]
 )
+BNMP_PORTAL_URL = os.environ.get(
+    "BNMP_PORTAL_URL",
+    "https://portalbnmp.pdpj.jus.br/#/pesquisa-peca",
+)
 BNMP_API = "https://portalbnmp.pdpj.jus.br/bnmpportal/api"
-COOKIE_TTL_SECONDS = 4 * 60
+BNMP_AUTH_HTML_FILE = ROOT / "bnmp_auth.html"
+BNMP_REMOTE_BROWSER_URL = os.environ.get("BNMP_REMOTE_BROWSER_URL", "")
+BNMP_BROWSER_EXPORT_URL = os.environ.get("BNMP_BROWSER_EXPORT_URL", "")
+BNMP_BROWSER_EXPORT_TOKEN = os.environ.get("BNMP_BROWSER_EXPORT_TOKEN", "")
+BNMP_COOKIES_FILE = os.environ.get("BNMP_COOKIES_FILE", "")
+COOKIE_TTL_SECONDS = int(os.environ.get("BNMP_COOKIE_TTL_SECONDS", str(4 * 60)))
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+APP_BASIC_AUTH_USER = os.environ.get("APP_BASIC_AUTH_USER", "").strip()
+APP_BASIC_AUTH_PASSWORD = os.environ.get("APP_BASIC_AUTH_PASSWORD", "")
+BNMP_ENABLE_HSTS = os.environ.get("BNMP_ENABLE_HSTS", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "sim",
+}
 
 AUTH = {
     "cookie": "",
+    "fingerprint": "",
     "expires_at": 0.0,
+    "source": "",
+    "authenticated_at": 0.0,
 }
 RECORD_CACHE = {
     "key": None,
@@ -1035,11 +1057,92 @@ def extract_cookie(raw_cookie):
     if not raw_cookie:
         return ""
 
-    match = re.search(r"portalbnmp=([^;\s]+)", raw_cookie)
+    match = re.search(r"(?:^|[;\s])portalbnmp=([^;\s]+)", raw_cookie)
     if match:
         return match.group(1).strip()
 
     return raw_cookie
+
+
+def extract_cookie_from_list(cookies):
+    if not isinstance(cookies, list):
+        return ""
+
+    for cookie in cookies:
+        if not isinstance(cookie, dict):
+            continue
+
+        if cookie.get("name") == "portalbnmp":
+            return str(cookie.get("value") or "").strip()
+
+    return ""
+
+
+def session_from_payload(payload):
+    if isinstance(payload, list):
+        return extract_cookie_from_list(payload), ""
+
+    if not isinstance(payload, dict):
+        return "", ""
+
+    cookie = (
+        payload.get("cookie")
+        or payload.get("portalbnmp")
+        or extract_cookie_from_list(payload.get("cookies"))
+    )
+    fingerprint = payload.get("fingerprint") or ""
+
+    return str(cookie or ""), str(fingerprint or "").strip()
+
+
+def load_session_from_cookies_file():
+    if not BNMP_COOKIES_FILE:
+        return False, "BNMP_COOKIES_FILE nao configurado."
+
+    path = Path(BNMP_COOKIES_FILE).resolve()
+
+    if not path.exists():
+        return False, f"Arquivo de sessao BNMP nao encontrado: {path}"
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return False, f"Nao foi possivel ler a sessao BNMP: {error}"
+
+    cookie, fingerprint = session_from_payload(payload)
+
+    if not set_bnmp_session(cookie, fingerprint, "cookies-file"):
+        return False, "Arquivo de sessao sem cookie portalbnmp valido."
+
+    return True, ""
+
+
+def export_remote_browser_session():
+    if not BNMP_BROWSER_EXPORT_URL:
+        return False, "BNMP_BROWSER_EXPORT_URL nao configurado."
+
+    if requests is None:
+        return False, "O pacote requests nao esta instalado."
+
+    headers = {}
+    if BNMP_BROWSER_EXPORT_TOKEN:
+        headers["X-BNMP-Export-Token"] = BNMP_BROWSER_EXPORT_TOKEN
+
+    try:
+        response = requests.post(BNMP_BROWSER_EXPORT_URL, headers=headers, timeout=30)
+    except requests.RequestException as error:
+        return False, f"Falha ao acionar o navegador remoto BNMP: {error}"
+
+    if response.status_code >= 400:
+        try:
+            payload = response.json()
+            detail = payload.get("error") or response.text[:300]
+        except (ValueError, AttributeError):
+            detail = response.text[:300]
+
+        return False, f"Navegador remoto recusou a exportacao: {detail}"
+
+    return load_session_from_cookies_file()
 
 
 def cookie_remaining_seconds():
@@ -1049,26 +1152,50 @@ def cookie_remaining_seconds():
     return max(0, int(AUTH["expires_at"] - time.time()))
 
 
-def set_cookie(raw_cookie):
+def set_bnmp_session(raw_cookie, fingerprint="", source="manual"):
     cookie = extract_cookie(raw_cookie)
 
     if not cookie:
-        AUTH["cookie"] = ""
-        AUTH["expires_at"] = 0.0
+        clear_bnmp_session()
         return False
 
     AUTH["cookie"] = cookie
+    AUTH["fingerprint"] = (fingerprint or "").strip()
     AUTH["expires_at"] = time.time() + COOKIE_TTL_SECONDS
+    AUTH["source"] = source
+    AUTH["authenticated_at"] = time.time()
     return True
 
 
-def clear_cookie():
+def clear_bnmp_session():
     AUTH["cookie"] = ""
+    AUTH["fingerprint"] = ""
     AUTH["expires_at"] = 0.0
+    AUTH["source"] = ""
+    AUTH["authenticated_at"] = 0.0
+
+
+def auth_status_payload():
+    remaining = cookie_remaining_seconds()
+
+    if remaining <= 0 and AUTH["cookie"]:
+        clear_bnmp_session()
+
+    return {
+        "authenticated": remaining > 0,
+        "remainingSeconds": max(0, remaining),
+        "ttlSeconds": COOKIE_TTL_SECONDS,
+        "source": AUTH["source"] if remaining > 0 else "",
+        "fingerprintPresent": bool(AUTH["fingerprint"]) if remaining > 0 else False,
+        "remoteBrowserConfigured": bool(BNMP_REMOTE_BROWSER_URL),
+        "browserExportConfigured": bool(BNMP_BROWSER_EXPORT_URL),
+        "cookiesFileConfigured": bool(BNMP_COOKIES_FILE),
+        "portalUrl": BNMP_PORTAL_URL,
+    }
 
 
 def pdf_headers():
-    return {
+    headers = {
         "Accept": "application/pdf, application/octet-stream, application/json, */*",
         "Accept-Language": "pt-BR,pt;q=0.9",
         "Origin": "https://portalbnmp.pdpj.jus.br",
@@ -1079,6 +1206,11 @@ def pdf_headers():
             "Chrome/146.0.0.0 Safari/537.36"
         ),
     }
+
+    if AUTH["fingerprint"]:
+        headers["fingerprint"] = AUTH["fingerprint"]
+
+    return headers
 
 
 def safe_filename(value):
@@ -1104,9 +1236,60 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
+    def send_security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Cache-Control", "no-store")
+
+        if BNMP_ENABLE_HSTS:
+            self.send_header(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
+
+    def basic_auth_enabled(self):
+        return bool(APP_BASIC_AUTH_USER and APP_BASIC_AUTH_PASSWORD)
+
+    def basic_auth_valid(self):
+        header = self.headers.get("Authorization", "")
+
+        if not header.startswith("Basic "):
+            return False
+
+        try:
+            decoded = base64.b64decode(header[6:], validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return False
+
+        username, separator, password = decoded.partition(":")
+
+        if not separator:
+            return False
+
+        return hmac.compare_digest(username, APP_BASIC_AUTH_USER) and hmac.compare_digest(
+            password,
+            APP_BASIC_AUTH_PASSWORD,
+        )
+
+    def require_basic_auth(self, path):
+        if path == "/api/health" or not self.basic_auth_enabled():
+            return False
+
+        if self.basic_auth_valid():
+            return False
+
+        self.send_response(401)
+        self.send_security_headers()
+        self.send_header("WWW-Authenticate", 'Basic realm="BNMP PMTO", charset="UTF-8"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
+
     def send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
+        self.send_security_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -1136,6 +1319,20 @@ class Handler(BaseHTTPRequestHandler):
 
         body = HTML_FILE.read_bytes()
         self.send_response(200)
+        self.send_security_headers()
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def serve_auth_html(self):
+        if not BNMP_AUTH_HTML_FILE.exists():
+            self.send_json(500, {"error": "bnmp_auth.html nao encontrado."})
+            return
+
+        body = BNMP_AUTH_HTML_FILE.read_bytes()
+        self.send_response(200)
+        self.send_security_headers()
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -1143,6 +1340,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
+        self.send_security_headers()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Password")
         self.end_headers()
@@ -1151,8 +1349,15 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
+        if self.require_basic_auth(path):
+            return
+
         if path in {"/", "/painel_tocantins.html"}:
             self.serve_html()
+            return
+
+        if path == "/bnmp/autenticar":
+            self.serve_auth_html()
             return
 
         if path == "/api/mandados":
@@ -1164,12 +1369,18 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/auth/status":
-            remaining = cookie_remaining_seconds()
+            self.send_json(200, auth_status_payload())
+            return
+
+        if path == "/api/auth/config":
             self.send_json(
                 200,
                 {
-                    "authenticated": remaining > 0,
-                    "remainingSeconds": remaining,
+                    "portalUrl": BNMP_PORTAL_URL,
+                    "remoteBrowserUrl": BNMP_REMOTE_BROWSER_URL,
+                    "remoteBrowserConfigured": bool(BNMP_REMOTE_BROWSER_URL),
+                    "browserExportConfigured": bool(BNMP_BROWSER_EXPORT_URL),
+                    "cookiesFileConfigured": bool(BNMP_COOKIES_FILE),
                     "ttlSeconds": COOKIE_TTL_SECONDS,
                 },
             )
@@ -1184,6 +1395,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if self.require_basic_auth(path):
+            return
 
         if path == "/api/admin/login":
             try:
@@ -1206,25 +1420,63 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "JSON invalido."})
                 return
 
-            ok = set_cookie(payload.get("cookie", ""))
+            ok = set_bnmp_session(
+                payload.get("cookie", ""),
+                payload.get("fingerprint", ""),
+                "manual-cookie",
+            )
 
             if not ok:
                 self.send_json(400, {"error": "Cookie nao informado."})
                 return
 
-            self.send_json(
-                200,
-                {
-                    "authenticated": True,
-                    "remainingSeconds": cookie_remaining_seconds(),
-                    "ttlSeconds": COOKIE_TTL_SECONDS,
-                },
+            self.send_json(200, auth_status_payload())
+            return
+
+        if path == "/api/auth/session":
+            try:
+                payload = self.read_json()
+            except json.JSONDecodeError:
+                self.send_json(400, {"error": "JSON invalido."})
+                return
+
+            cookie, fingerprint = session_from_payload(payload)
+            ok = set_bnmp_session(
+                cookie,
+                fingerprint,
+                payload.get("source", "manual-session"),
             )
+
+            if not ok:
+                self.send_json(400, {"error": "Sessao BNMP sem cookie valido."})
+                return
+
+            self.send_json(200, auth_status_payload())
+            return
+
+        if path == "/api/auth/export-remote-session":
+            ok, error = export_remote_browser_session()
+
+            if not ok:
+                self.send_json(400, {"error": error})
+                return
+
+            self.send_json(200, auth_status_payload())
+            return
+
+        if path == "/api/auth/import-cookies-file":
+            ok, error = load_session_from_cookies_file()
+
+            if not ok:
+                self.send_json(400, {"error": error})
+                return
+
+            self.send_json(200, auth_status_payload())
             return
 
         if path == "/api/auth/logout":
-            clear_cookie()
-            self.send_json(200, {"authenticated": False, "remainingSeconds": 0})
+            clear_bnmp_session()
+            self.send_json(200, auth_status_payload())
             return
 
         if path == "/api/data/upload":
@@ -1259,10 +1511,10 @@ class Handler(BaseHTTPRequestHandler):
 
         remaining = cookie_remaining_seconds()
         if remaining <= 0:
-            clear_cookie()
+            clear_bnmp_session()
             self.send_json(
                 401,
-                {"error": "Cookie expirado. Renove o cookie BNMP."},
+                {"error": "Sessao BNMP expirada. Abra a autenticacao BNMP."},
             )
             return
 
@@ -1287,10 +1539,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if response.status_code in {401, 403}:
-            clear_cookie()
+            clear_bnmp_session()
             self.send_json(
                 401,
-                {"error": "Cookie recusado pelo BNMP. Cole um novo cookie."},
+                {"error": "Sessao BNMP recusada. Autentique novamente."},
             )
             return
 
@@ -1323,6 +1575,7 @@ class Handler(BaseHTTPRequestHandler):
         filename = f"{base_name}.pdf"
 
         self.send_response(200)
+        self.send_security_headers()
         self.send_header("Content-Type", "application/pdf")
         self.send_header(
             "Content-Disposition",
