@@ -149,11 +149,14 @@ BNMP_BROWSER_EXPORT_TOKEN=gere-um-token-interno-longo
 BNMP_REMOTE_BROWSER_URL=https://seu-dominio/vnc.html?autoconnect=1&resize=remote
 BNMP_VNC_PASSWORD=gere-uma-senha-forte-para-o-novnc
 BNMP_BROWSER_COOKIE_WAIT_SECONDS=12
+BNMP_CAPTURED_SESSION_MAX_AGE_SECONDS=600
 BNMP_COOKIES_FILE=/app/data/bnmp_cookies.json
 BNMP_COOKIE_TTL_SECONDS=240
 ```
 
 O `BNMP_BROWSER_EXPORT_TOKEN` deve ter o mesmo valor no `painel-bnmp` e no `bnmp-browser`; ele impede que outro container acione a exportacao de cookies sem autorizacao. O `BNMP_VNC_PASSWORD` protege a tela remota do Chromium; o usuario vai informar essa senha no noVNC antes de resolver o captcha.
+
+O sidecar tambem monitora as respostas de rede do Chromium: quando o portal retorna o header `Authorization` apos o captcha, ele salva esse valor como `portalbnmp`. Isso cobre ambientes em que o navegador chega na tela de pesquisa, mas nao persiste o cookie. A janela padrao para aceitar uma sessao capturada dessa forma e `600` segundos.
 
 ## Seguranca para VPS
 

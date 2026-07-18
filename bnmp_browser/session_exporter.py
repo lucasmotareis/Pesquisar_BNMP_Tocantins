@@ -1,10 +1,13 @@
 import json
 import hmac
 import os
+import base64
+import threading
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -27,6 +30,9 @@ EXPORT_TOKEN = os.environ.get("BNMP_BROWSER_EXPORT_TOKEN", "")
 EXPORT_TOKEN_HEADER = "X-BNMP-Export-Token"
 PORTAL_COOKIE_NAME = "portalbnmp"
 COOKIE_WAIT_SECONDS = float(os.environ.get("BNMP_BROWSER_COOKIE_WAIT_SECONDS", "12"))
+CAPTURED_SESSION_MAX_AGE_SECONDS = int(
+    os.environ.get("BNMP_CAPTURED_SESSION_MAX_AGE_SECONDS", "600")
+)
 
 
 class CDPError(RuntimeError):
@@ -90,6 +96,20 @@ class CDPSession:
     def close(self) -> None:
         self.ws.close()
 
+    def recv_message(self, timeout: float | None = None) -> dict[str, Any]:
+        if timeout is not None:
+            self.ws.settimeout(timeout)
+
+        try:
+            raw = self.ws.recv()
+        except websocket.WebSocketTimeoutException:
+            return {}
+        finally:
+            if timeout is not None:
+                self.ws.settimeout(10)
+
+        return json.loads(raw)
+
     def call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         request_id = self.next_id
         self.next_id += 1
@@ -104,8 +124,7 @@ class CDPSession:
         )
 
         while True:
-            raw = self.ws.recv()
-            message = json.loads(raw)
+            message = self.recv_message()
 
             if message.get("id") != request_id:
                 continue
@@ -154,6 +173,59 @@ def normalize_cookie(cookie: dict[str, Any]) -> dict[str, Any]:
     return {key: cookie[key] for key in allowed if key in cookie}
 
 
+def jwt_expiry(token: str) -> int | None:
+    parts = token.split(".")
+
+    if len(parts) != 3:
+        return None
+
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)
+
+    try:
+        decoded = base64.urlsafe_b64decode(payload.encode("ascii"))
+        data = json.loads(decoded.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    exp = data.get("exp")
+
+    return int(exp) if isinstance(exp, (int, float)) else None
+
+
+def looks_like_bnmp_token(value: str) -> bool:
+    token = normalize_authorization_token(value)
+    return token.count(".") == 2 and len(token) > 80
+
+
+def normalize_authorization_token(value: str) -> str:
+    token = (value or "").strip()
+
+    if token.lower().startswith("bearer "):
+        return token[7:].strip()
+
+    return token
+
+
+def cookie_from_token(token: str, current_url: str = "") -> dict[str, Any]:
+    domain = urlparse(current_url or BNMP_PORTAL_URL).hostname or "portalbnmp.pdpj.jus.br"
+    cookie = {
+        "name": PORTAL_COOKIE_NAME,
+        "value": normalize_authorization_token(token),
+        "domain": domain,
+        "path": "/",
+        "httpOnly": False,
+        "secure": current_url.startswith("https://")
+        if current_url
+        else BNMP_PORTAL_URL.startswith("https://"),
+    }
+    expires = jwt_expiry(cookie["value"])
+
+    if expires:
+        cookie["expires"] = expires
+
+    return cookie
+
+
 def dedupe_cookies(cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     seen = set()
@@ -197,6 +269,44 @@ def cookies_from_document_cookie(raw_cookie: str, current_url: str) -> list[dict
                 "secure": current_url.startswith("https://"),
             }
         )
+
+    return cookies
+
+
+def cookies_from_set_cookie_header(value: str, current_url: str = "") -> list[dict[str, Any]]:
+    cookies = []
+
+    if not value:
+        return cookies
+
+    for raw_cookie in str(value).replace("\r\n", "\n").split("\n"):
+        if not raw_cookie.strip():
+            continue
+
+        parsed = SimpleCookie()
+
+        try:
+            parsed.load(raw_cookie)
+        except CookieError:
+            continue
+
+        for morsel in parsed.values():
+            domain = morsel["domain"] or urlparse(current_url or BNMP_PORTAL_URL).hostname
+            path = morsel["path"] or "/"
+            cookie = {
+                "name": morsel.key,
+                "value": morsel.value,
+                "domain": domain or "portalbnmp.pdpj.jus.br",
+                "path": path,
+                "httpOnly": bool(morsel["httponly"]),
+                "secure": bool(morsel["secure"]),
+            }
+            expires = jwt_expiry(cookie["value"])
+
+            if expires:
+                cookie["expires"] = expires
+
+            cookies.append(cookie)
 
     return cookies
 
@@ -304,6 +414,45 @@ def read_fingerprint(session: CDPSession) -> str:
     ).strip()
 
 
+def snapshot_browser_state(extra_cookies=None, source_url: str = "") -> dict[str, Any]:
+    wait_for_browser()
+    targets = fetch_json(f"{CDP_BASE_URL}/json/list")
+    target = pick_page_target(targets)
+    session = CDPSession(target["webSocketDebuggerUrl"])
+
+    try:
+        current_url = current_page_url(session, str(target.get("url", "")))
+        cookies = read_browser_cookies(session, current_url)
+        if extra_cookies:
+            cookies.extend(extra_cookies)
+
+        fingerprint = read_fingerprint(session)
+        user_agent = evaluate(session, "navigator.userAgent") or ""
+        page_title = evaluate(session, "document.title") or target.get("title", "")
+        storage_keys = local_storage_keys(session)
+    finally:
+        session.close()
+
+    return {
+        "cookies": dedupe_cookies(cookies),
+        "fingerprint": fingerprint,
+        "userAgent": user_agent,
+        "portalUrl": BNMP_PORTAL_URL,
+        "currentUrl": current_url,
+        "targetUrl": str(target.get("url", "")),
+        "pageTitle": page_title,
+        "localStorageKeys": storage_keys,
+        "sourceUrl": source_url,
+        "authorizationHeaderCaptured": bool(extra_cookies),
+        "targetUrls": [
+            str(item.get("url", ""))
+            for item in targets
+            if isinstance(item, dict) and item.get("type") == "page"
+        ][:10],
+        "exportedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def extract_browser_session() -> dict[str, Any]:
     wait_for_browser()
 
@@ -371,6 +520,58 @@ def save_session(session_data: dict[str, Any]) -> None:
     temp_path.replace(BNMP_COOKIES_FILE)
 
 
+def read_saved_session() -> dict[str, Any] | None:
+    if not BNMP_COOKIES_FILE.exists():
+        return None
+
+    try:
+        session_data = json.loads(BNMP_COOKIES_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    return session_data if isinstance(session_data, dict) else None
+
+
+def saved_session_is_fresh(session_data: dict[str, Any]) -> bool:
+    cookies = session_data.get("cookies") or []
+    now = time.time()
+
+    for cookie in cookies:
+        if not isinstance(cookie, dict) or cookie.get("name") != PORTAL_COOKIE_NAME:
+            continue
+
+        expires = cookie.get("expires")
+        if isinstance(expires, (int, float)):
+            return expires > now + 5
+
+        break
+
+    exported_at = session_data.get("exportedAt")
+    if not exported_at:
+        return False
+
+    try:
+        exported_at_dt = datetime.fromisoformat(str(exported_at))
+    except ValueError:
+        return False
+
+    if exported_at_dt.tzinfo is None:
+        exported_at_dt = exported_at_dt.replace(tzinfo=timezone.utc)
+
+    age = datetime.now(timezone.utc) - exported_at_dt.astimezone(timezone.utc)
+    return age.total_seconds() <= CAPTURED_SESSION_MAX_AGE_SECONDS
+
+
+def save_authorization_session(token: str, source_url: str = "") -> bool:
+    if not looks_like_bnmp_token(token):
+        return False
+
+    cookie = cookie_from_token(token, source_url)
+    session_data = snapshot_browser_state([cookie], source_url)
+    save_session(session_data)
+    return True
+
+
 def public_summary(session_data: dict[str, Any]) -> dict[str, Any]:
     cookies = session_data.get("cookies") or []
     cookie_names = sorted(
@@ -401,6 +602,9 @@ def public_summary(session_data: dict[str, Any]) -> dict[str, Any]:
         "postCaptchaNavigationTried": bool(
             session_data.get("postCaptchaNavigationTried")
         ),
+        "authorizationHeaderCaptured": bool(
+            session_data.get("authorizationHeaderCaptured")
+        ),
         "exportedAt": session_data.get("exportedAt", ""),
     }
 
@@ -425,6 +629,79 @@ def missing_portal_cookie_payload(session_data: dict[str, Any]) -> dict[str, Any
     summary["localStorageKeys"] = session_data.get("localStorageKeys", [])
     summary["targetUrls"] = session_data.get("targetUrls", [])
     return summary
+
+
+def header_value(headers: dict[str, Any], name: str) -> str:
+    for key, value in headers.items():
+        if str(key).lower() == name.lower():
+            return str(value)
+
+    return ""
+
+
+def headers_from_network_event(message: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    params = message.get("params", {})
+    response = params.get("response") or {}
+    headers = params.get("headers") or response.get("headers") or {}
+    url = str(response.get("url") or params.get("url") or "")
+
+    if not isinstance(headers, dict):
+        return {}, url
+
+    return headers, url
+
+
+def capture_session_from_network_headers(headers: dict[str, Any], url: str) -> bool:
+    authorization = header_value(headers, "authorization")
+
+    if authorization and looks_like_bnmp_token(authorization):
+        return save_authorization_session(authorization, url)
+
+    set_cookie = header_value(headers, "set-cookie")
+    cookies = cookies_from_set_cookie_header(set_cookie, url)
+
+    for cookie in cookies:
+        if cookie.get("name") == PORTAL_COOKIE_NAME:
+            session_data = snapshot_browser_state(cookies, url)
+            save_session(session_data)
+            return True
+
+    return False
+
+
+def monitor_authorization_headers() -> None:
+    while True:
+        session = None
+
+        try:
+            wait_for_browser()
+            targets = fetch_json(f"{CDP_BASE_URL}/json/list")
+            target = pick_page_target(targets)
+            session = CDPSession(target["webSocketDebuggerUrl"])
+            session.call("Network.enable")
+
+            while True:
+                message = session.recv_message(timeout=1)
+
+                if not message:
+                    continue
+
+                method = message.get("method")
+
+                if method not in {
+                    "Network.responseReceived",
+                    "Network.responseReceivedExtraInfo",
+                }:
+                    continue
+
+                headers, url = headers_from_network_event(message)
+                capture_session_from_network_headers(headers, url)
+        except Exception as error:
+            print(f"Monitor BNMP reiniciando: {error}", flush=True)
+            time.sleep(2)
+        finally:
+            if session:
+                session.close()
 
 
 def export_token_configured() -> bool:
@@ -517,6 +794,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             session_data = extract_browser_session()
             if not has_portal_cookie(session_data):
+                saved_session = read_saved_session()
+
+                if (
+                    saved_session
+                    and has_portal_cookie(saved_session)
+                    and saved_session_is_fresh(saved_session)
+                ):
+                    self.send_json(200, public_summary(saved_session))
+                    return
+
                 self.send_json(409, missing_portal_cookie_payload(session_data))
                 return
 
@@ -529,6 +816,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    threading.Thread(target=monitor_authorization_headers, daemon=True).start()
+
     server = ThreadingHTTPServer(("0.0.0.0", EXPORT_PORT), Handler)
     print(f"BNMP browser exporter listening on http://0.0.0.0:{EXPORT_PORT}")
     print(f"Cookies file: {BNMP_COOKIES_FILE}")
